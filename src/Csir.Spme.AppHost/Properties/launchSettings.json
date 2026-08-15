@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/launchsettings.json",
+  "profiles": {
+    "https": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "DOTNET_ENVIRONMENT": "Development",
+        "ASPIRE_DASHBOARD_TELEMETRY_OPTOUT": "true",
+        "ASPIRE_DATABASE_MODE": "persistent",
+        "ASPIRE_APPLY_DATABASE_MIGRATIONS": "false",
+        "ASPIRE_SQL_DATA_VOLUME": "csir-spme-v2-sql-data-preimport-20260811",
+        "ASPIRE_SQL_HOST_PORT": "15435"
+      }
+    }
+  }
+}

@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [develop, main]
+  pull_request:
+    branches: [develop, main]
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+      - name: Restore
+        run: dotnet restore Csir.Spme.sln
+      - name: Build
+        run: dotnet build Csir.Spme.sln -c Release --no-restore
+      - name: OpenAPI and Scalar contract tests
+        run: >
+          dotnet test tests/Csir.Spme.Api.IntegrationTests/Csir.Spme.Api.IntegrationTests.csproj
+          -c Release --no-build
+          --filter FullyQualifiedName~DocumentationEndpointTests
+      - name: Architecture tests
+        run: dotnet test tests/Csir.Spme.ArchitectureTests/Csir.Spme.ArchitectureTests.csproj -c Release --no-build

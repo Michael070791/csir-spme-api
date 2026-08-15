@@ -1,0 +1,17 @@
+<Project Sdk="Aspire.AppHost.Sdk/13.4.6">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Csir.Spme.AppHost</RootNamespace>
+    <UserSecretsId>csir-spme-apphost-97d2377a-10f5-43d0-8e84-477f8ea776a6</UserSecretsId>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Aspire.Hosting.AppHost" />
+    <PackageReference Include="Aspire.Hosting.SqlServer" />
+    <PackageReference Include="Aspire.Hosting.Azure.Storage" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Csir.Spme.Api\Csir.Spme.Api.csproj" />
+    <ProjectReference Include="..\..\tools\Csir.Spme.Tools.DatabaseMigrator\Csir.Spme.Tools.DatabaseMigrator.csproj" />
+  </ItemGroup>
+</Project>

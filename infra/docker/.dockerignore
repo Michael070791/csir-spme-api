@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/.idea/
+**/*.user
+**/*.suo
+**/*.db
+**/*.db-shm
+**/*.db-wal
+.git/
+.agents/
+.opencode/
+screenshots/
+e2e/
+frontend/**/node_modules/
+frontend/**/dist/

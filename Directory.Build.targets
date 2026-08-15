@@ -1,0 +1,5 @@
+<Project>
+  <ItemGroup>
+    <Content Remove="bin/**;obj/**;bin\**;obj\**" />
+  </ItemGroup>
+</Project>

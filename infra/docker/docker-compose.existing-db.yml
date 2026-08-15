@@ -1,0 +1,38 @@
+name: csir-spme-api-existing-db
+
+services:
+  spme-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: csir-spme-api
+    ports:
+      - "${SPME_API_HOST_PORT:-5082}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      DatabaseProvider__UseSqlite: "false"
+      ConnectionStrings__DefaultConnection: "${SPME_DB_CONNECTION_STRING:?Set SPME_DB_CONNECTION_STRING to the existing SQL Server connection string}"
+      Jwt__Issuer: "${SPME_JWT_ISSUER:-csir-spme-api}"
+      Jwt__Audience: "${SPME_JWT_AUDIENCE:-csir-spme-client}"
+      Jwt__Key: "${SPME_JWT_KEY:?Set SPME_JWT_KEY}"
+      AccountActivation__HashKey: "${SPME_ACCOUNT_ACTIVATION_HASH_KEY:?Set SPME_ACCOUNT_ACTIVATION_HASH_KEY}"
+      PasswordReset__HashKey: "${SPME_PASSWORD_RESET_HASH_KEY:?Set SPME_PASSWORD_RESET_HASH_KEY}"
+      Identity__SeedAdmin__UserName: "${SPME_SEED_ADMIN_USERNAME:-platform.admin}"
+      Identity__SeedAdmin__Email: "${SPME_SEED_ADMIN_EMAIL:-platform.admin@csir.local}"
+      Identity__SeedAdmin__Password: "${SPME_SEED_ADMIN_PASSWORD:?Set SPME_SEED_ADMIN_PASSWORD}"
+      Identity__SeedHrAdmin__UserName: "${SPME_SEED_HR_ADMIN_USERNAME:-hr.admin}"
+      Identity__SeedHrAdmin__Email: "${SPME_SEED_HR_ADMIN_EMAIL:-hr.admin@csir.local}"
+      Identity__SeedHrAdmin__Password: "${SPME_SEED_HR_ADMIN_PASSWORD:-}"
+      Identity__SeedHrAdmin__InstituteCode: "${SPME_SEED_HR_ADMIN_INSTITUTE_CODE:-DEV-HR}"
+      OpenApi__ServerUrl: "${OPENAPI_SERVER_URL:-http://localhost:5082}"
+      Storage__Provider: local
+      Messaging__DispatcherEnabled: "false"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+networks:
+  default:
+    name: "${SPME_DOCKER_NETWORK:-csir-spme}"
+    external: true

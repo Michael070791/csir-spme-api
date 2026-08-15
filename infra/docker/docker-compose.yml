@@ -1,0 +1,76 @@
+name: csir-spme-api
+
+services:
+  spme-api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+    container_name: csir-spme-api
+    ports:
+      - "${SPME_API_HOST_PORT:-5082}:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      ASPNETCORE_URLS: http://+:8080
+      DatabaseProvider__UseSqlite: "false"
+      ConnectionStrings__DefaultConnection: "Server=spme-sql,1433;Database=CsirSpmeV2;User Id=sa;Password=${SPME_DB_SA_PASSWORD:?Set SPME_DB_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
+      Jwt__Issuer: csir-spme-api
+      Jwt__Audience: csir-spme-client
+      Jwt__Key: "${SPME_JWT_KEY:?Set SPME_JWT_KEY}"
+      AccountActivation__HashKey: "${SPME_ACCOUNT_ACTIVATION_HASH_KEY:?Set SPME_ACCOUNT_ACTIVATION_HASH_KEY}"
+      PasswordReset__HashKey: "${SPME_PASSWORD_RESET_HASH_KEY:?Set SPME_PASSWORD_RESET_HASH_KEY}"
+      Identity__SeedAdmin__UserName: "${SPME_SEED_ADMIN_USERNAME:-platform.admin}"
+      Identity__SeedAdmin__Email: "${SPME_SEED_ADMIN_EMAIL:-platform.admin@csir.local}"
+      Identity__SeedAdmin__Password: "${SPME_SEED_ADMIN_PASSWORD:?Set SPME_SEED_ADMIN_PASSWORD}"
+      Identity__SeedHrAdmin__UserName: "${SPME_SEED_HR_ADMIN_USERNAME:-hr.admin}"
+      Identity__SeedHrAdmin__Email: "${SPME_SEED_HR_ADMIN_EMAIL:-hr.admin@csir.local}"
+      Identity__SeedHrAdmin__Password: "${SPME_SEED_HR_ADMIN_PASSWORD:-}"
+      Identity__SeedHrAdmin__InstituteCode: "${SPME_SEED_HR_ADMIN_INSTITUTE_CODE:-DEV-HR}"
+      OpenApi__ServerUrl: "${OPENAPI_SERVER_URL:-http://localhost:5082}"
+      Storage__Provider: local
+      Messaging__DispatcherEnabled: "false"
+    depends_on:
+      spme-db-migrator:
+        condition: service_completed_successfully
+      spme-sql:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+  spme-db-migrator:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile
+      target: migrator
+    container_name: csir-spme-api-db-migrator
+    environment:
+      DatabaseProvider__UseSqlite: "false"
+      DatabaseMigration__Apply: "${SPME_APPLY_DATABASE_MIGRATIONS:-true}"
+      DatabaseMigration__ConnectionTimeoutSeconds: "45"
+      ConnectionStrings__DefaultConnection: "Server=spme-sql,1433;Database=CsirSpmeV2;User Id=sa;Password=${SPME_DB_SA_PASSWORD:?Set SPME_DB_SA_PASSWORD};Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true"
+    depends_on:
+      spme-sql:
+        condition: service_healthy
+    restart: "no"
+
+  spme-sql:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: csir-spme-api-sql
+    ports:
+      - "${SPME_DB_HOST_PORT:-15433}:1433"
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "${SPME_DB_SA_PASSWORD:?Set SPME_DB_SA_PASSWORD}"
+    volumes:
+      - spme-sql-data:/var/opt/mssql
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 1 bash -c '</dev/tcp/127.0.0.1/1433'"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
+volumes:
+  spme-sql-data:

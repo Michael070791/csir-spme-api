@@ -1,0 +1,17 @@
+**/bin/
+**/obj/
+**/.vs/
+**/.vscode/
+**/.idea/
+**/*.user
+**/*.suo
+**/*.db
+**/*.db-shm
+**/*.db-wal
+.env
+.env.local
+**/.env.local
+*.publishsettings
+*.pubxml.user
+publish/
+artifacts/

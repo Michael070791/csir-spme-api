@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>Csir.Spme.ArchitectureTests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="FluentAssertions" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Csir.Spme.Api\Csir.Spme.Api.csproj" />
+    <ProjectReference Include="..\..\src\Csir.Spme.Application\Csir.Spme.Application.csproj" />
+    <ProjectReference Include="..\..\src\Csir.Spme.Domain\Csir.Spme.Domain.csproj" />
+    <ProjectReference Include="..\..\src\Csir.Spme.Infrastructure\Csir.Spme.Infrastructure.csproj" />
+  </ItemGroup>
+</Project>

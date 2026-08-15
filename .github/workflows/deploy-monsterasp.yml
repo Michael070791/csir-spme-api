@@ -1,0 +1,64 @@
+name: Deploy to MonsterASP
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-monsterasp-develop
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build, test, and deploy
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up .NET 10 SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore Csir.Spme.sln
+
+      - name: Build solution
+        run: dotnet build Csir.Spme.sln --configuration Release --no-restore
+
+      - name: Run documentation contract tests
+        run: >
+          dotnet test tests/Csir.Spme.Api.IntegrationTests/Csir.Spme.Api.IntegrationTests.csproj
+          --configuration Release --no-build
+          --filter FullyQualifiedName~DocumentationEndpointTests
+
+      - name: Publish Web API for IIS
+        run: >
+          dotnet publish src/Csir.Spme.Api/Csir.Spme.Api.csproj
+          --configuration Release
+          --no-restore
+          --output "${{ github.workspace }}\publish"
+          --runtime win-x86
+          --self-contained false
+
+      - name: Deploy to MonsterASP via Web Deploy
+        uses: rasmusbuchholdt/simply-web-deploy@2.2.0
+        with:
+          website-name: ${{ secrets.WEBSITE_NAME }}
+          server-computer-name: ${{ secrets.SERVER_COMPUTER_NAME }}
+          server-username: ${{ secrets.SERVER_USERNAME }}
+          server-password: ${{ secrets.SERVER_PASSWORD }}
+          source-path: '\publish\'
+
+      - name: Smoke test health endpoint
+        shell: pwsh
+        run: |
+          $response = Invoke-WebRequest -Uri "https://csir.runasp.net/health" -UseBasicParsing -TimeoutSec 60
+          if ($response.StatusCode -ne 200) {
+            throw "Health check failed with status $($response.StatusCode)"
+          }
