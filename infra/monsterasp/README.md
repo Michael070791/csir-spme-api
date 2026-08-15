@@ -7,6 +7,7 @@ Treat this host as **staging only**. Free tier: 256 MB RAM, 1 GB SQL, no automat
 1. Wait until `csir.runasp.net` is no longer in **Preparing DNS** status.
 2. Create a free **MSSQL** database in the MonsterASP control panel.
 3. Enable **WebDeploy** under Websites → Manage → Deploy / FTP / WebDeploy / Git.
+4. Do **not** use MonsterASP **Enable Github deploy** for this API. That feature clones source into `/wwwroot`; IIS needs a published `dotnet publish` output deployed via WebDeploy from GitHub Actions.
 
 ## Database migration (one-time)
 
