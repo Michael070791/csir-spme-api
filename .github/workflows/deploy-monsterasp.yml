@@ -45,6 +45,7 @@ jobs:
           --output "${{ github.workspace }}\publish"
           --runtime win-x86
           --self-contained false
+          /p:OpenApiGenerateDocuments=false
 
       - name: Deploy to MonsterASP via Web Deploy
         uses: rasmusbuchholdt/simply-web-deploy@2.2.0
