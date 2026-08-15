@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-monsterasp-develop
+  group: deploy-monsterasp-main
   cancel-in-progress: true
 
 jobs:
