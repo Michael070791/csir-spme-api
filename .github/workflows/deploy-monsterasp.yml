@@ -26,7 +26,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore dependencies
-        run: dotnet restore Csir.Spme.sln
+        run: dotnet restore Csir.Spme.sln --runtime win-x86
 
       - name: Build solution
         run: dotnet build Csir.Spme.sln --configuration Release --no-restore
