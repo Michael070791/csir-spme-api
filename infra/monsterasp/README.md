@@ -22,28 +22,42 @@ cd /path/to/spme-v2/api
 1. Temporarily enable **remote SQL** on the MonsterASP database (Users and Remote).
 2. Choose **one** of the options below.
 
-### Option A — generate SQL script (run locally, apply in MonsterASP SQL panel)
+**Important — two connection strings:**
 
-Requires the `dotnet-ef` global tool:
+| Use case | Host in connection string |
+|----------|---------------------------|
+| MonsterASP **website env vars** (API on hosting) | **Local/internal**: `dbXXXX.databaseasp.net` |
+| **Migrator from your PC** or SSMS | **Public/remote**: `dbXXXX.public.databaseasp.net` (only while remote access is **Enabled**) |
+
+Remote connections from your machine **cannot** use the internal/local string. Both need `Encrypt=True;TrustServerCertificate=True` when connecting from outside MonsterASP.
+
+### Option A — run SQL script in MonsterASP (no remote access from PC)
+
+**Do not use `--idempotent` in MonsterASP's web SQL runner.** Idempotent EF scripts split one migration into multiple `IF` blocks; SQL Server validates column names at compile time and fails with errors like `Invalid column name 'DisplayName'` even when an earlier block would add the column.
+
+**Fresh empty database** — generate a linear script (no `--idempotent`):
 
 ```bash
-dotnet tool install -g dotnet-ef   # once, if not installed
-dotnet ef migrations script --idempotent \
+cd /path/to/spme-v2/api
+dotnet ef migrations script \
   --project src/Csir.Spme.Infrastructure/Csir.Spme.Infrastructure.csproj \
   --startup-project src/Csir.Spme.Api/Csir.Spme.Api.csproj \
-  --output monsterasp-migration.sql
+  --output monsterasp-migration-fresh.sql
 ```
 
-Upload/run `monsterasp-migration.sql` against the MonsterASP database.
+Run `monsterasp-migration-fresh.sql` in MonsterASP **only on an empty database** (no existing tables). If a previous attempt partially created objects, delete/recreate the database in the control panel first, or drop all user tables/schemas before running.
 
-### Option B — apply migrations directly from your machine
+A copy may already exist locally as `api/monsterasp-migration-fresh.sql`.
 
-Point at the **remote** MonsterASP connection string (while remote SQL is enabled). The migrator loads the same infrastructure options as the API, so supply at least the secrets below:
+### Option B — apply migrations with EF migrator (recommended if remote SQL works)
+
+Requires **remote SQL enabled** and the **public** connection string from the control panel (Users and Remote → show connection string):
 
 ```bash
-export ConnectionStrings__DefaultConnection='Server=dbXXXX.databaseasp.net;Database=dbXXXX;User Id=...;Password=...;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true'
+export ConnectionStrings__DefaultConnection='Server=dbXXXX.public.databaseasp.net;Database=dbXXXX;User Id=dbXXXX;Password=...;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true'
 export DatabaseProvider__UseSqlite=false
 export DatabaseMigration__Apply=true
+export DatabaseMigration__ConnectionTimeoutSeconds=120
 export PasswordReset__HashKey='your-32-byte-or-longer-secret'
 
 dotnet run --project tools/Csir.Spme.Tools.DatabaseMigrator/Csir.Spme.Tools.DatabaseMigrator.csproj
@@ -54,13 +68,108 @@ Use the same `PasswordReset__HashKey` value you set in MonsterASP environment va
 3. Create and download a `.bak` backup after schema is applied.
 4. Disable remote SQL access again.
 
+## Seeding business data (employees, institutes, leave, etc.)
+
+Schema migration alone creates **empty tables**. The API startup only seeds:
+
+| Source | What it adds |
+|--------|----------------|
+| `IdentitySeedHostedService` | System roles, permission claims, optional PlatformAdmin/HR admin users, employee Identity accounts (when employees already exist) |
+| `PromotionCatalogSeedHostedService` | Canonical Senior Staff grades, Sections 20-22 paths, and the open **2027** (1 January) promotion cycle |
+| `PromotionRequirementTemplateSeedHostedService` | Promotion document templates **only after** promotion cycles/paths exist |
+| `PromotionDemoStaffSeedHostedService` | Optional demo Senior Staff (eligible via verified B.Sc.) and Senior Member (coming soon) logins |
+
+**All CSIR business data** (institutes, ~2,500 employees, leave, planning, projects, reports, memos, legacy users) comes from **`Csir.Spme.Tools.LegacyImport`** reading the July 2026 legacy BACPACs. See [`docs/legacy-import.md`](../../../docs/legacy-import.md).
+
+**MonsterASP free tier warning:** 1 GB SQL / 256 MB RAM. A full legacy import may fit, but monitor database size in the control panel. Legacy BACPAC restore runs **locally**; only the import **target** is MonsterASP.
+
+### Prerequisites
+
+1. Schema applied on `db63934` (22 migrations — you already have this).
+2. **At least one user** in the target DB (PlatformAdmin preferred). Restart the API once with `Identity__SeedAdmin__*` env vars set, or confirm a user exists:
+
+```sql
+SELECT u.UserName, r.Name
+FROM iam.Users u
+JOIN iam.UserRoles ur ON ur.UserId = u.Id
+JOIN iam.Roles r ON r.Id = ur.RoleId;
+```
+
+3. **Remote SQL enabled** on MonsterASP while importing from your PC.
+4. Local SQL Server (Docker `api/infra/docker` or existing) with legacy BACPACs restored.
+
+### Step 1 — restore legacy sources locally
+
+BACPAC paths (from project docs):
+
+- `/home/csir/Documents/CSIR/BUCKUP/22-06-2026/csir-auth-spme-db-2026-7-28-22-32.bacpac`
+- `/home/csir/Documents/CSIR/BUCKUP/22-06-2026/csir-spme-db-2026-7-28-22-33.bacpac`
+
+```bash
+cd /home/csir/Desktop/projects/spme-v2
+export BACKUP_DIR=/home/csir/Documents/CSIR/BUCKUP/22-06-2026
+export SQL_SERVER=localhost,15433
+export SQL_PASSWORD='your-local-sa-password'
+bash scripts/legacy/restore-bacpacs.sh
+```
+
+This creates read-only source databases `LegacyAuthSpme` and `LegacySpme` on your machine.
+
+### Step 2 — dry-run import into MonsterASP
+
+```bash
+cd /home/csir/Desktop/projects/spme-v2/api
+
+export LEGACY_AUTH_CONNECTION_STRING='Server=localhost,15433;Database=LegacyAuthSpme;User Id=sa;Password=...;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true'
+export LEGACY_SPME_CONNECTION_STRING='Server=localhost,15433;Database=LegacySpme;User Id=sa;Password=...;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true'
+export TARGET_CONNECTION_STRING='Server=db63934.public.databaseasp.net;Database=db63934;User Id=db63934;Password=...;Encrypt=True;TrustServerCertificate=True;MultipleActiveResultSets=true'
+
+dotnet run --project tools/Csir.Spme.Tools.LegacyImport/Csir.Spme.Tools.LegacyImport.csproj -- \
+  --auth-backup-path /home/csir/Documents/CSIR/BUCKUP/22-06-2026/csir-auth-spme-db-2026-7-28-22-32.bacpac \
+  --spme-backup-path /home/csir/Documents/CSIR/BUCKUP/22-06-2026/csir-spme-db-2026-7-28-22-33.bacpac \
+  --dry-run
+```
+
+Dry-run applies everything in a transaction and **rolls back** — safe verification.
+
+### Step 3 — apply import
+
+```bash
+dotnet run --project tools/Csir.Spme.Tools.LegacyImport/Csir.Spme.Tools.LegacyImport.csproj -- \
+  --auth-backup-path /home/csir/Documents/CSIR/BUCKUP/22-06-2026/csir-auth-spme-db-2026-7-28-22-32.bacpac \
+  --spme-backup-path /home/csir/Documents/CSIR/BUCKUP/22-06-2026/csir-spme-db-2026-7-28-22-33.bacpac \
+  --apply
+```
+
+Expect roughly **19k+ inserts** (employees, leave, org structure, reports, etc.). Re-running with the same BACPAC checksum is a no-op.
+
+### Step 4 — post-import
+
+1. Download a `.bak` backup from MonsterASP.
+2. **Disable remote SQL**.
+3. **Restart** the website.
+4. Verify: `curl http://csir.runasp.net/readyz` and log in with a seeded or imported account.
+
+### What is not imported automatically
+
+- Promotion cycles, grades, equivalencies (configure via HR API)
+- File attachments / blob bytes (metadata may be quarantined in `ops.LegacyImportIssues`)
+- Legacy management roles mapped to V2 (`Admin`/`HR`/`Director` stay as policy-ambiguity — assign `HrAdmin` explicitly in V2)
+
+### Minimal staging (no legacy data)
+
+If you only need admin login and empty institutes, skip LegacyImport. Set `Identity__SeedAdmin__*` and `Identity__SeedHrAdmin__*` env vars, restart the API, then create data through the HR portal/API.
+
 ## Environment variables
 
 Set under **Websites → csir.runasp.net → Manage → Scripting → Environment Variables**, then restart the site.
 
-Use double underscores (`__`) for nested keys (e.g. `Jwt__Key` → `Jwt:Key`).
+**Complete paste list (every `appsettings` key, including ZeptoMail and MNotify):**
+[`environment-variables.md`](./environment-variables.md)
 
-### Required for Production startup
+Use double underscores (`__`) for nested keys (e.g. `Jwt__Key` → `Jwt:Key`). Copy secret values from `dotnet user-secrets list --project src/Csir.Spme.Api`. Do not commit those secrets.
+
+Minimum keys the process will not start without:
 
 | Key | Value |
 |-----|-------|
@@ -71,113 +180,11 @@ Use double underscores (`__`) for nested keys (e.g. `Jwt__Key` → `Jwt:Key`).
 | `PasswordReset__HashKey` | Random secret, **at least 32 UTF-8 bytes** |
 | `DatabaseProvider__UseSqlite` | `false` |
 | `Storage__Provider` | `local` |
-| `Messaging__DispatcherEnabled` | `false` |
-| `OpenApi__ServerUrl` | `https://csir.runasp.net` (or `http://` until HTTPS is enabled) |
+| `OpenApi__ServerUrl` | `http://csir.runasp.net` until HTTPS is enabled |
 
-These have safe defaults in `appsettings.json` and usually do not need env overrides unless you want explicit values:
+To send mail and SMS on this host, also set every ZeptoMail and MNotify key from the complete list and set `Messaging__DispatcherEnabled=true`. Auth/notify ZeptoMail token+sender pairs must be set together. Restart after saving.
 
-| Key | Default |
-|-----|---------|
-| `Jwt__Issuer` | `csir-spme-api` |
-| `Jwt__Audience` | `csir-spme-client` |
-| `Jwt__ExpiryMinutes` | `15` |
-| `Jwt__RefreshTokenExpiryDays` | `7` |
-| `Storage__ContainerName` | `spme-private` |
-| `Storage__ReadUrlLifetime` | `00:05:00` |
-| `PasswordReset__TokenLifespan` | `1.00:00:00` (must stay 24 hours) |
-
-### Recommended for staging
-
-| Key | Notes |
-|-----|-------|
-| `Cors__AllowedOrigins__0` | Staff portal origin (HTTPS when available) |
-| `Cors__AllowedOrigins__1` | HR portal origin (HTTPS when available) |
-| `PortalUrls__StaffPortalUrl` | Used in emails; must be HTTPS in Production |
-| `PortalUrls__HrPortalUrl` | Used in emails; must be HTTPS in Production |
-| `PortalUrls__StaffPasswordResetUrl` | Must be HTTPS in Production |
-| `PortalUrls__HrPasswordResetUrl` | Must be HTTPS in Production |
-| `PortalUrls__LogoUrl` | Optional; leave unset or use HTTPS |
-| `Documentation__SiteUrl` | OpenAPI contact/docs link metadata |
-| `Documentation__SupportEmail` | OpenAPI support contact (optional) |
-
-If unset, `PortalUrls` fall back to the production URLs already in `appsettings.json` / `appsettings.Production.json`.
-
-### Optional — initial admin users (staging only)
-
-Never commit passwords. Set only while seeding, then remove or rotate.
-
-| Key | Purpose |
-|-----|---------|
-| `Identity__SeedAdmin__UserName` | Platform admin username |
-| `Identity__SeedAdmin__Email` | Platform admin email |
-| `Identity__SeedAdmin__Password` | Platform admin password |
-| `Identity__SeedHrAdmin__UserName` | HR admin username |
-| `Identity__SeedHrAdmin__Email` | HR admin email |
-| `Identity__SeedHrAdmin__Password` | HR admin password |
-| `Identity__SeedHrAdmin__InstituteCode` | Institute code for seeded HR admin |
-
-### Not required on MonsterASP free staging (disabled by default)
-
-`ZeptoMail` and `MNotify` default to **`Enabled: false`** in `appsettings.json`. With that setting, **no tokens or API keys are required** and the API will start without them. Email/SMS are queued in the outbox but not sent while `Messaging__DispatcherEnabled` is `false`.
-
-When you are ready to send mail/SMS in staging, set `Messaging__DispatcherEnabled` to `true` and configure the provider you enable.
-
-#### ZeptoMail (only if `ZeptoMail__Enabled=true`)
-
-| Key | Required when enabled |
-|-----|------------------------|
-| `ZeptoMail__Enabled` | `true` |
-| `ZeptoMail__SendMailToken` | Yes |
-| `ZeptoMail__FromEmail` | Yes |
-| `ZeptoMail__FromName` | Optional (default `CSIR SPME System`) |
-| `ZeptoMail__ApiBaseUrl` | Optional (default `https://api.zeptomail.com`) |
-| `ZeptoMail__AuthSendMailToken` | Only with matching `ZeptoMail__AuthFromEmail` |
-| `ZeptoMail__AuthFromEmail` | Only with matching `ZeptoMail__AuthSendMailToken` |
-| `ZeptoMail__AuthFromName` | Optional |
-| `ZeptoMail__NotifySendMailToken` | Only with matching `ZeptoMail__NotifyFromEmail` |
-| `ZeptoMail__NotifyFromEmail` | Only with matching `ZeptoMail__NotifySendMailToken` |
-| `ZeptoMail__NotifyFromName` | Optional |
-| `ZeptoMail__BounceAddress` | Optional |
-| `ZeptoMail__WebhookSecret` | Optional (webhook verification) |
-| `ZeptoMail__TrackOpens` | Optional (`true` / `false`) |
-| `ZeptoMail__TrackClicks` | Optional (`true` / `false`) |
-| `ZeptoMail__TimeoutSeconds` | Optional (default `30`) |
-
-#### MNotify (only if `MNotify__Enabled=true`)
-
-| Key | Required when enabled |
-|-----|------------------------|
-| `MNotify__Enabled` | `true` |
-| `MNotify__ApiKey` | Yes |
-| `MNotify__SenderId` | Yes (max 11 chars; default `CSIR`) |
-| `MNotify__BaseUrl` | Optional (default `https://api.mnotify.com/api`) |
-| `MNotify__SmsEndpoint` | Optional |
-| `MNotify__OtpExpiryMinutes` | Optional |
-| `MNotify__OtpLength` | Optional |
-| `MNotify__OtpMessageTemplate` | Optional |
-
-### Not used with `Storage__Provider=local`
-
-Do **not** set these on MonsterASP unless you switch to Azure Blob storage:
-
-- `ConnectionStrings__BlobStorage`
-- `Storage__ServiceUri`
-- `Storage__ExternalServiceUri`
-- `Storage__CreateContainer`
-- `Storage__ManagedIdentityClientId`
-
-### Upload limits (optional overrides)
-
-Defaults in `appsettings.json` are fine unless you need different limits:
-
-- `PromotionUploadOptions__MaximumFileBytes` (default 200 MiB)
-- `StaffReportUploadOptions__*` (concept note, image sizes, session minutes)
-- `ProfileDocumentOptions__MaximumFileBytes`, `ProfileDocumentOptions__UploadSessionMinutes`
-
-### Pagination (optional)
-
-- `Pagination__CursorSigningKey` — only if you want a separate HMAC key; otherwise JWT key is reused
-- `Pagination__DefaultLimit`, `Pagination__MaxLimit` — optional tuning
+Imported employees still need a canonical `GradeId` before they can be assessed. Do not map job titles automatically.
 
 ## GitHub Actions secrets (WebDeploy)
 

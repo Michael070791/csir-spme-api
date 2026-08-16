@@ -51,7 +51,13 @@ public class SpmeApiFactory : WebApplicationFactory<Program>
                 ["Messaging:DispatcherEnabled"] = "false",
                 ["Identity:SeedAdmin:UserName"] = "platform.admin",
                 ["Identity:SeedAdmin:Email"] = "platform.admin@csir.local",
-                ["Identity:SeedAdmin:Password"] = "TestOnly_Admin_2026!"
+                ["Identity:SeedAdmin:Password"] = "TestOnly_Admin_2026!",
+                ["Identity:SeedDemoStaff:UserName"] = "",
+                ["Identity:SeedDemoStaff:Email"] = "",
+                ["Identity:SeedDemoStaff:Password"] = "",
+                ["Identity:SeedDemoSeniorMember:UserName"] = "",
+                ["Identity:SeedDemoSeniorMember:Email"] = "",
+                ["Identity:SeedDemoSeniorMember:Password"] = ""
             });
             if (MaximumIdempotencyResponseBytes.HasValue)
             {

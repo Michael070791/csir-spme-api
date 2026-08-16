@@ -14,4 +14,26 @@ public class Grade : BaseEntity
     public bool IsActive { get; private set; }
 
     private Grade() { }
+
+    public static Grade Create(
+        string code,
+        string name,
+        string staffCategory,
+        string promotionStream,
+        short promotionLevel,
+        short rank,
+        bool isPromotionGrade = true)
+    {
+        return new Grade
+        {
+            Code = code.Trim(),
+            Name = name.Trim(),
+            StaffCategory = staffCategory.Trim(),
+            PromotionStream = promotionStream.Trim(),
+            PromotionLevel = promotionLevel,
+            Rank = rank,
+            IsPromotionGrade = isPromotionGrade,
+            IsActive = true
+        };
+    }
 }

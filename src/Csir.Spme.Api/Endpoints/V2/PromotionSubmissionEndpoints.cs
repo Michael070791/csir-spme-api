@@ -33,10 +33,6 @@ internal static class PromotionSubmissionEndpoints
             .WithName("PromotionSubmissions_Create")
             .WithSummary("Create the authenticated employee's promotion submission.")
             .WithDescription("Creates a draft from the authenticated employee's eligible assessment while the cycle is open, snapshots applicable requirements, and idempotently returns the existing submission for the same assessment.");
-        self.MapGet("/{id:guid}", GetMineAsync)
-            .WithName("PromotionSubmissions_GetMine")
-            .WithSummary("Get an owned promotion submission.")
-            .WithDescription("Returns an ETag-bearing promotion submission only when it belongs to the authenticated employee; unknown and other employees' identifiers receive the same non-disclosing not-found response.");
         self.MapPatch("/{id:guid}", PatchAsync)
             .WithName("PromotionSubmissions_UpdateMine")
             .WithSummary("Update an owned promotion submission.")
@@ -61,10 +57,6 @@ internal static class PromotionSubmissionEndpoints
             .WithName("PromotionSubmissions_RemoveDocument")
             .WithSummary("Remove an owned promotion submission document.")
             .WithDescription("Marks a document and its file as removed only when the authenticated employee uploaded it to an editable owned submission, and requires the current submission If-Match ETag.");
-        self.MapGet("/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentAsync)
-            .WithName("PromotionSubmissions_DownloadDocument")
-            .WithSummary("Download an owned promotion submission document.")
-            .WithDescription("Streams a clean promotion document for the submission owner without exposing storage locations.");
         self.MapPost("/{id:guid}/submit", SubmitAsync)
             .WithName("PromotionSubmissions_Submit")
             .WithSummary("Submit an owned promotion case for HR review.")
@@ -81,6 +73,18 @@ internal static class PromotionSubmissionEndpoints
             .WithSummary("Complete a direct file upload session.")
             .WithDescription("Completes an authenticated employee's promotion-document or profile-document upload session after verifying declared size, content type, SHA-256 checksum, file signature, and malware scan result.");
 
+        var visible = endpoints.MapGroup("/api/v2/promotion-submissions")
+            .WithGroupName("v2").WithTags("Promotion submissions")
+            .RequireAuthorization(AuthorizationPolicies.ReadVisiblePromotionSubmission);
+        visible.MapGet("/{id:guid}", GetAsync)
+            .WithName("PromotionSubmissions_Get")
+            .WithSummary("Get a promotion submission.")
+            .WithDescription("Returns an ETag-bearing promotion submission for the authenticated owner or for institute-scoped HR and platform reviewers. Unknown, other employees', and cross-institute identifiers share the same non-disclosing not-found response.");
+        visible.MapGet("/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentAsync)
+            .WithName("PromotionSubmissions_DownloadDocument")
+            .WithSummary("Download a promotion submission document.")
+            .WithDescription("Streams a clean promotion document for the submission owner or an authorized institute-scoped reviewer without exposing storage locations.");
+
         var review = endpoints.MapGroup("/api/v2/promotion-submissions")
             .WithGroupName("v2").WithTags("Promotion submissions")
             .RequireAuthorization(AuthorizationPolicies.ReadPromotions);
@@ -88,14 +92,6 @@ internal static class PromotionSubmissionEndpoints
             .WithName("PromotionSubmissions_ListForReview")
             .WithSummary("List promotion submissions for review.")
             .WithDescription("Returns promotion submissions for the caller's institute, optionally filtered by lifecycle status; platform administrators can review submissions across institutes.");
-        review.MapGet("/{id:guid}", GetForReviewAsync)
-            .WithName("PromotionSubmissions_GetForReview")
-            .WithSummary("Get a promotion submission for review.")
-            .WithDescription("Returns an ETag-bearing promotion submission when the caller has institute-scoped or platform review access.");
-        review.MapGet("/{id:guid}/documents/{documentId:guid}/content", DownloadDocumentAsync)
-            .WithName("PromotionSubmissions_DownloadDocumentForReview")
-            .WithSummary("Download a promotion submission document for review.")
-            .WithDescription("Streams a clean promotion document for authorized institute-scoped HR reviewers without exposing storage locations.");
         review.MapPost("/{id:guid}/begin-review", BeginReviewAsync).RequireAuthorization(AuthorizationPolicies.WritePromotions)
             .WithName("PromotionSubmissions_BeginReview")
             .WithSummary("Begin HR review of a promotion submission.")
@@ -189,9 +185,9 @@ internal static class PromotionSubmissionEndpoints
         return TypedResults.Created(context.Response.Headers.Location.ToString(), response);
     }
 
-    private static async Task<IResult> GetMineAsync(Guid id, SpmeDbContext db, HttpContext context, CancellationToken ct)
+    private static async Task<IResult> GetAsync(Guid id, SpmeDbContext db, HttpContext context, CancellationToken ct)
     {
-        var submission = await FindMineAsync(db, context, id, false, ct);
+        var submission = await FindReadableAsync(db, context, id, ct);
         return submission is null ? NotFound() : await ResourceAsync(db, submission, context, ct);
     }
 
@@ -268,12 +264,6 @@ internal static class PromotionSubmissionEndpoints
         var stream = await storage.DownloadAsync(document.StorageKey, ct);
         if (stream is null) return NotFound();
         return Results.File(stream, document.ContentType, document.OriginalFileName, enableRangeProcessing: true);
-    }
-
-    private static async Task<IResult> GetForReviewAsync(Guid id, SpmeDbContext db, HttpContext context, CancellationToken ct)
-    {
-        var submission = await FindReadableAsync(db, context, id, ct);
-        return submission is null ? NotFound() : await ResourceAsync(db, submission, context, ct);
     }
 
     private static async Task<IResult> CreateUploadSessionAsync(Guid id, CreatePromotionDocumentUploadRequest request,
@@ -626,18 +616,46 @@ internal static class PromotionSubmissionEndpoints
         SpmeDbContext db, IReadOnlyList<Guid> employeeIds, CancellationToken ct)
     {
         if (employeeIds.Count == 0) return [];
-        return await (from employee in db.Employees.AsNoTracking()
-                      join employment in db.EmploymentRecords.AsNoTracking() on employee.Id equals employment.EmployeeId
-                      join division in db.Divisions.AsNoTracking() on employment.DivisionId equals division.Id into divisions
-                      from division in divisions.DefaultIfEmpty()
-                      where employeeIds.Contains(employee.Id) && employment.IsCurrent
-                      select new EmployeeSummary(
-                          employee.Id,
-                          employee.StaffId,
-                          employee.PreferredName ??
-                          string.Join(' ', new[] { employee.OtherNames, employee.Surname }.Where(value => !string.IsNullOrWhiteSpace(value))),
-                          division != null ? division.Name : null))
-            .ToDictionaryAsync(item => item.EmployeeId, ct);
+
+        var employees = await db.Employees.AsNoTracking()
+            .Where(employee => employeeIds.Contains(employee.Id))
+            .Select(employee => new { employee.Id, employee.StaffId, employee.PreferredName, employee.OtherNames, employee.Surname })
+            .ToListAsync(ct);
+        var employments = await db.EmploymentRecords.AsNoTracking()
+            .Where(employment => employeeIds.Contains(employment.EmployeeId) && employment.IsCurrent)
+            .Select(employment => new { employment.EmployeeId, employment.DivisionId })
+            .ToListAsync(ct);
+        var divisionIds = employments
+            .Where(employment => employment.DivisionId.HasValue)
+            .Select(employment => employment.DivisionId!.Value)
+            .Distinct()
+            .ToList();
+        var divisions = divisionIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await db.Divisions.AsNoTracking()
+                .Where(division => divisionIds.Contains(division.Id))
+                .ToDictionaryAsync(division => division.Id, division => division.Name, ct);
+        var divisionByEmployee = employments
+            .GroupBy(employment => employment.EmployeeId)
+            .ToDictionary(group => group.Key, group => group.First().DivisionId);
+
+        var summaries = new Dictionary<Guid, EmployeeSummary>(employees.Count);
+        foreach (var employee in employees)
+        {
+            string? divisionName = null;
+            if (divisionByEmployee.TryGetValue(employee.Id, out var divisionId) &&
+                divisionId is Guid resolvedDivisionId)
+                divisions.TryGetValue(resolvedDivisionId, out divisionName);
+
+            summaries[employee.Id] = new EmployeeSummary(
+                employee.Id,
+                employee.StaffId,
+                employee.PreferredName ??
+                string.Join(' ', new[] { employee.OtherNames, employee.Surname }.Where(value => !string.IsNullOrWhiteSpace(value))),
+                divisionName);
+        }
+
+        return summaries;
     }
 
     private sealed record EmployeeSummary(Guid EmployeeId, string StaffId, string DisplayName, string? DivisionName);

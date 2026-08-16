@@ -3,6 +3,9 @@ namespace Csir.Spme.Domain.Promotions;
 public static class PromotionConstants
 {
     public const string SeniorStaff = "senior-staff";
+    public const string TechnicalStream = "technical";
+    public const string AdministrativeStream = "administrative";
+    public const short CurrentCycleYear = 2027;
     public const string CyclePlanned = "planned";
     public const string CycleOpen = "open";
     public const string CycleClosed = "closed";

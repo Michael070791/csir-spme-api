@@ -15,6 +15,26 @@ public sealed class PromotionPolicySource : BaseEntity
     public string Status { get; private set; } = "active";
 
     private PromotionPolicySource() { }
+
+    public static PromotionPolicySource Create(
+        string title,
+        string documentVersion,
+        string sectionReference,
+        string pageReference,
+        string sourceChecksum,
+        DateTime effectiveFrom)
+    {
+        return new PromotionPolicySource
+        {
+            Title = title.Trim(),
+            DocumentVersion = documentVersion.Trim(),
+            SectionReference = sectionReference.Trim(),
+            PageReference = pageReference.Trim(),
+            SourceChecksum = sourceChecksum.Trim(),
+            EffectiveFrom = effectiveFrom,
+            Status = "active"
+        };
+    }
 }
 
 public sealed class PromotionCycle : BaseEntity
@@ -55,6 +75,38 @@ public sealed class PromotionPath : BaseEntity
     public DateTime? EffectiveTo { get; private set; }
 
     private PromotionPath() { }
+
+    public static PromotionPath Create(
+        string code,
+        Guid policySourceId,
+        string sectionReference,
+        string staffCategory,
+        string promotionStream,
+        Guid sourceGradeId,
+        Guid targetGradeId,
+        short minimumYearsInSourceGrade,
+        string requiredQualificationLevel,
+        DateTime effectiveFrom,
+        string status = PromotionConstants.PathActive)
+    {
+        return new PromotionPath
+        {
+            Code = code.Trim(),
+            PolicySourceId = policySourceId,
+            SectionReference = sectionReference.Trim(),
+            StaffCategory = staffCategory.Trim(),
+            PromotionStream = promotionStream.Trim(),
+            SourceGradeId = sourceGradeId,
+            TargetGradeId = targetGradeId,
+            MinimumYearsInSourceGrade = minimumYearsInSourceGrade,
+            RequiredQualificationLevel = requiredQualificationLevel.Trim(),
+            RequiresRecognisedInstitution = true,
+            RequiresRelevantField = true,
+            RequiresSatisfactoryAppraisal = true,
+            Status = status,
+            EffectiveFrom = effectiveFrom
+        };
+    }
 }
 
 public sealed class PromotionGradeEquivalency : BaseEntity

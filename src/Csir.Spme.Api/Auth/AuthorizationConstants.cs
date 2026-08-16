@@ -43,6 +43,7 @@ public static class AuthorizationPolicies
     public const string WritePromotions = "promotions.write";
     public const string ApprovePromotions = "promotions.approve";
     public const string ReadOwnPromotionStatus = "promotions.self.read";
+    public const string ReadVisiblePromotionSubmission = "promotions.submission.read";
     public const string ReadPromotionReports = "promotion-reports.read";
     public const string WriteOwnPromotionReports = "promotion-reports.self.write";
     public const string ReadReports = "reports.read";

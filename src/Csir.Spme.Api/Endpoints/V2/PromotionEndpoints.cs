@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using Csir.Spme.Api.Auth;
+using Csir.Spme.Domain.Constants;
 using Csir.Spme.Domain.Promotions;
 using Csir.Spme.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -18,23 +19,23 @@ internal static class PromotionEndpoints
 
         catalog.MapGet("/promotion-cycles", GetCyclesAsync)
             .WithName("PromotionCycles_List")
-            .WithSummary("List promotion cycles.")
-            .WithDescription("Returns all configured promotion cycles ordered from newest to oldest, including each cycle's effective promotion date and current lifecycle status.")
+            .WithSummary("List configured promotion cycles.")
+            .WithDescription("Returns every promotion cycle newest-first, including the fixed 1 January effective date and whether the cycle is planned, open, closed, or finalized. Institute HR uses this catalogue when opening assessments; it is not employee self-service.")
             .Produces<CollectionResponse<PromotionCycleResponse>>(StatusCodes.Status200OK);
         catalog.MapGet("/promotion-paths", GetPathsAsync)
             .WithName("PromotionPaths_List")
-            .WithSummary("List active promotion paths.")
-            .WithDescription("Returns active promotion paths, optionally filtered by staff category and promotion stream, with canonical source and target grades and policy requirements.")
+            .WithSummary("List Senior Staff promotion paths.")
+            .WithDescription("Returns Conditions of Service Sections 20-22 paths, including the Section 22 administrative path that remains requires-policy-confirmation. Optional staffCategory and promotionStream filters narrow the catalogue. Each item includes canonical source and target grades, minimum years in the source grade, and the required qualification level.")
             .Produces<CollectionResponse<PromotionPathResponse>>(StatusCodes.Status200OK);
         catalog.MapGet("/promotions/eligibility", GetEligibilityAsync)
             .WithName("Promotions_Eligibility")
-            .WithSummary("List persisted promotion assessments for the caller's institute scope.")
-            .WithDescription("Returns persisted promotion status snapshots visible within the caller's institute scope, optionally limited to a cycle year and ordered from newest cycle.")
+            .WithSummary("List institute promotion status snapshots.")
+            .WithDescription("Returns persisted promotion status snapshots inside the caller's institute scope, newest cycle first. Optional cycleYear limits the list. This is the HR worklist of assessed employees, not a live eligibility calculator.")
             .Produces<CollectionResponse<PromotionStatusResponse>>(StatusCodes.Status200OK);
         catalog.MapGet("/promotions/due", GetDueAsync)
             .WithName("Promotions_Due")
-            .WithSummary("List employees with persisted eligible-for-review promotion assessments.")
-            .WithDescription("Returns institute-scoped promotion status snapshots whose eligibility state is eligible-for-review, optionally limited to a specified promotion cycle year.")
+            .WithSummary("List employees eligible for review.")
+            .WithDescription("Returns institute-scoped status snapshots whose eligibilityState is eligible-for-review. Optional cycleYear limits the list. Eligible-for-review means documented checks passed; it is not promotion approval or entitlement.")
             .Produces<CollectionResponse<PromotionStatusResponse>>(StatusCodes.Status200OK);
 
         endpoints.MapPost("/api/v2/promotion-assessments", CreateAssessmentAsync)
@@ -42,15 +43,15 @@ internal static class PromotionEndpoints
             .WithTags("Promotions")
             .RequireAuthorization(AuthorizationPolicies.WritePromotions)
             .WithName("PromotionAssessments_Create")
-            .WithSummary("Assess an employee against their current canonical grade for a promotion cycle.")
-            .WithDescription("Creates an institute-scoped assessment by evaluating the employee's current canonical grade, applicable Senior Staff path, qualification evidence, appraisal evidence, and cycle date; conflicts prevent duplicate or unsupported assessments.")
+            .WithSummary("Create a promotion assessment for one employee and cycle.")
+            .WithDescription("Evaluates the employee's current canonical grade against the matching Senior Staff path, 1 January cycle date, verified B.Sc. or satisfactory appraisal evidence, and path status. Duplicate employee-cycle-path rows, missing grades, and unmatched paths return conflict. The resulting snapshot is what unlocks start-promotion-submission for the employee.")
             .Produces<PromotionAssessmentResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
         catalog.MapGet("/promotion-assessments/{assessmentId:guid}", GetAssessmentAsync)
             .WithName("PromotionAssessments_Get")
-            .WithSummary("Get a persisted promotion assessment within the caller's institute scope.")
-            .WithDescription("Returns a persisted promotion assessment only when it is visible in the caller's institute scope; inaccessible and unknown assessment identifiers produce the same not-found outcome.")
+            .WithSummary("Get one promotion assessment.")
+            .WithDescription("Returns a persisted assessment when it is visible in the caller's institute scope. Unknown identifiers and cross-institute identifiers share the same not-found outcome.")
             .Produces<PromotionAssessmentResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
@@ -60,8 +61,8 @@ internal static class PromotionEndpoints
             .RequireAuthorization(AuthorizationPolicies.ReadOwnPromotionStatus);
         self.MapGet("/me", GetMyStatusAsync)
             .WithName("PromotionStatus_GetMine")
-            .WithSummary("Get the authenticated employee's promotion status.")
-            .WithDescription("Returns the authenticated employee's latest promotion status for an optional cycle year. Linked employees receive a live status when no HR snapshot exists yet. Unlinked identities receive a non-disclosing not-found response.")
+            .WithSummary("Get my promotion status.")
+            .WithDescription("Returns the authenticated employee's confidential promotion status for an optional cycle year. When HR has not stored a snapshot, a live status is calculated from the open 1 January cycle, canonical grade, and evidence. Senior Members receive a coming-soon not-applicable result and cannot start an application. Unlinked identities receive a non-disclosing not-found response. Cache-Control is no-store.")
             .Produces<PromotionStatusResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
         endpoints.MapPost("/api/v2/promotion-status-lookups", LookupMyStatusAsync)
@@ -70,8 +71,8 @@ internal static class PromotionEndpoints
             .RequireAuthorization(AuthorizationPolicies.ReadOwnPromotionStatus)
             .RequireRateLimiting("promotion-status-lookup")
             .WithName("PromotionStatus_Lookup")
-            .WithSummary("Verify the authenticated employee's staff ID and category, then get their promotion status.")
-            .WithDescription("Verifies staff ID and Senior Staff category only against the authenticated employee before returning cycle-specific status; identity mismatches and absent records share a non-disclosing not-found outcome.")
+            .WithSummary("Verify my staff ID and category, then return promotion status.")
+            .WithDescription("Confirms that the submitted staffId and staffCategory (junior-staff, senior-staff, or senior-member) match the authenticated employee, then returns the same payload as GET /promotion-status/me. Mismatches and missing links share a non-disclosing not-found outcome. Invalid categories or cycle years return 422. Limited to 5 requests per 15 minutes. This is not a login and never returns another employee's record.")
             .Produces<PromotionStatusResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status422UnprocessableEntity);
@@ -81,8 +82,8 @@ internal static class PromotionEndpoints
             .WithTags("Promotions")
             .RequireAuthorization(AuthorizationPolicies.ReadPromotions)
             .WithName("Employees_GetPromotionStatus")
-            .WithSummary("Get an employee promotion status within the caller's institute scope.")
-            .WithDescription("Returns an employee's promotion status for an optional cycle year when the employee is visible in the caller's institute scope, enriching assessed records with criteria and available lifecycle actions.")
+            .WithSummary("Get an employee's promotion status for HR.")
+            .WithDescription("Returns one employee's promotion status for an optional cycle year when the employee is inside the caller's institute scope. Assessed records include criteria and permitted lifecycle actions. Cross-institute identifiers return not-found.")
             .Produces<PromotionStatusResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
     }
@@ -103,7 +104,9 @@ internal static class PromotionEndpoints
         string? promotionStream,
         CancellationToken cancellationToken)
     {
-        var query = db.PromotionPaths.AsNoTracking().Where(path => path.Status == PromotionConstants.PathActive);
+        var query = db.PromotionPaths.AsNoTracking()
+            .Where(path => path.Status == PromotionConstants.PathActive ||
+                           path.Status == PromotionConstants.PathRequiresPolicyConfirmation);
         if (!string.IsNullOrWhiteSpace(staffCategory)) query = query.Where(path => path.StaffCategory == staffCategory);
         if (!string.IsNullOrWhiteSpace(promotionStream)) query = query.Where(path => path.PromotionStream == promotionStream);
         var items = await query.OrderBy(path => path.Code).Select(path => new PromotionPathResponse(
@@ -275,103 +278,10 @@ internal static class PromotionEndpoints
         var appointmentDate = employment?.AppointmentDate;
         var lastPromotionDate = employment?.PromotionDate;
         var sourceEffective = employment?.EffectiveFrom;
-        if (cycle is null)
-        {
-            return new PromotionStatusResponse(
-                employee.StaffId,
-                staffCategory,
-                cycleYear ?? (short)DateTime.UtcNow.Year,
-                new DateTime(DateTime.UtcNow.Year, 1, 1),
-                PromotionConstants.AssessmentNotAssessed,
-                PromotionConstants.EligibilityNoRuleDefined,
-                null,
-                null,
-                null,
-                employment?.GradeId,
-                null,
-                DateTimeOffset.UtcNow,
-                [],
-                [],
-                "No promotion cycle is available yet.",
-                null,
-                null,
-                null,
-                appointmentDate,
-                lastPromotionDate,
-                sourceEffective);
-        }
-
-        PromotionPath? path = null;
-        if (employment?.GradeId is Guid gradeId)
-        {
-            path = await db.PromotionPaths.AsNoTracking()
-                .Where(item => item.StaffCategory == PromotionConstants.SeniorStaff && item.SourceGradeId == gradeId)
-                .Where(item => item.EffectiveFrom <= cycle.EffectivePromotionDate &&
-                               (item.EffectiveTo == null || item.EffectiveTo >= cycle.EffectivePromotionDate))
-                .OrderBy(item => item.Status == PromotionConstants.PathActive ? 0 : 1)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        var qualificationSatisfied = false;
-        var qualificationRejected = false;
-        if (path is not null)
-        {
-            var qualifications = await db.EducationRecords.AsNoTracking()
-                .Where(item => item.EmployeeId == employeeId && item.QualificationLevel == path.RequiredQualificationLevel)
-                .Select(item => new { item.InstitutionRecognitionStatus, item.RelevantFieldStatus })
-                .ToListAsync(cancellationToken);
-            qualificationSatisfied = qualifications.Any(item =>
-                item.InstitutionRecognitionStatus == "verified" && item.RelevantFieldStatus == "verified");
-            qualificationRejected = qualifications.Any(item =>
-                item.InstitutionRecognitionStatus == "rejected" || item.RelevantFieldStatus == "rejected");
-        }
-
-        var appraisals = await db.PerformanceAppraisals.AsNoTracking()
-            .Where(item => item.EmployeeId == employeeId)
-            .Select(item => new { item.Outcome, item.ApprovedAt })
-            .ToListAsync(cancellationToken);
-        var evaluation = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
-            staffCategory,
-            path?.Status ?? PromotionConstants.PathActive,
-            sourceEffective ?? cycle.EffectivePromotionDate,
-            path?.MinimumYearsInSourceGrade ?? 0,
-            cycle.EffectivePromotionDate,
-            qualificationSatisfied,
-            qualificationRejected,
-            appraisals.Any(item => item.ApprovedAt.HasValue && item.Outcome == "satisfactory"),
-            appraisals.Any(item => item.ApprovedAt.HasValue && item.Outcome == "unsatisfactory")));
-
-        var blocking = evaluation.BlockingReasons;
-        var pending = evaluation.PendingHrChecks;
-        var eligibility = evaluation.EligibilityState;
-        var criteria = eligibility == PromotionConstants.EligibilityNotApplicable
-            ? new List<PromotionStatusCriterion> { new("staff-category", "not-met", PromotionConstants.SeniorStaff) }
-            : new List<PromotionStatusCriterion>
-            {
-                new("staff-category", "satisfied", PromotionConstants.SeniorStaff),
-                Criterion("time-in-source-grade", blocking, pending, "source-grade-service",
-                    path is null ? null : $"{path.MinimumYearsInSourceGrade} years"),
-                Criterion("qualification", blocking, pending, "qualification", path?.RequiredQualificationLevel),
-                Criterion("recognised-institution", blocking, pending, "qualification"),
-                Criterion("relevant-field", blocking, pending, "qualification"),
-                Criterion("satisfactory-appraisal", blocking, pending, "satisfactory-appraisal")
-            };
-
-        var nextAction = eligibility switch
-        {
-            PromotionConstants.EligibilityEligibleForReview =>
-                "You meet the documented checks. HR still needs to open an assessment before a submission can start.",
-            PromotionConstants.EligibilityNotYetEligible => "Await the next eligible promotion cycle.",
-            PromotionConstants.EligibilityPolicyAmbiguity =>
-                "This path needs an approved policy confirmation before a submission can start.",
-            PromotionConstants.EligibilityNeedsHrReview => "HR still needs to verify remaining evidence.",
-            PromotionConstants.EligibilityNotEligible => "This assessment does not currently qualify for review.",
-            PromotionConstants.EligibilityNotApplicable => "Promotion self-service applies to Senior Staff only.",
-            _ => "Await HR assessment for the current promotion cycle."
-        };
+        var placeholderYear = cycle?.CycleYear ?? cycleYear ?? PromotionConstants.CurrentCycleYear;
+        var placeholderDate = cycle?.EffectivePromotionDate ?? new DateTime(placeholderYear, 1, 1);
 
         PromotionGradeRef? currentGrade = null;
-        PromotionNextPromotion? nextPromotion = null;
         if (employment?.GradeId is Guid sourceGradeId)
         {
             var sourceGrade = await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == sourceGradeId, cancellationToken);
@@ -379,10 +289,98 @@ internal static class PromotionEndpoints
                 currentGrade = new PromotionGradeRef(sourceGrade.Code, sourceGrade.Name);
         }
 
-        if (path is not null && path.TargetGradeId is Guid targetGradeId)
+        if (!string.Equals(staffCategory, PromotionConstants.SeniorStaff, StringComparison.OrdinalIgnoreCase))
+        {
+            return LiveStatus(
+                employee.StaffId, staffCategory, placeholderYear, placeholderDate,
+                PromotionConstants.EligibilityNotApplicable,
+                [new("staff-category", "not-met", PromotionConstants.SeniorStaff)],
+                PromotionStatusMessages.ForStaffCategory(staffCategory),
+                employment?.GradeId, null, currentGrade, null, null,
+                appointmentDate, lastPromotionDate, sourceEffective);
+        }
+
+        if (cycle is null)
+        {
+            return LiveStatus(
+                employee.StaffId, staffCategory, placeholderYear, placeholderDate,
+                PromotionConstants.EligibilityNoRuleDefined,
+                [new("staff-category", "satisfied", PromotionConstants.SeniorStaff)],
+                PromotionStatusMessages.NoCycleOpen,
+                employment?.GradeId, null, currentGrade, null, null,
+                appointmentDate, lastPromotionDate, sourceEffective);
+        }
+
+        if (employment?.GradeId is null)
+        {
+            return LiveStatus(
+                employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
+                PromotionConstants.EligibilityNeedsHrReview,
+                [
+                    new("staff-category", "satisfied", PromotionConstants.SeniorStaff),
+                    new("time-in-source-grade", "pending-hr-review"),
+                    new("qualification", "pending-hr-review", QualificationLevels.BachelorOrEquivalent),
+                    new("recognised-institution", "pending-hr-review"),
+                    new("relevant-field", "pending-hr-review"),
+                    new("satisfactory-appraisal", "pending-hr-review")
+                ],
+                PromotionStatusMessages.NoCanonicalGrade,
+                null, null, currentGrade, null, null,
+                appointmentDate, lastPromotionDate, sourceEffective);
+        }
+
+        var path = await db.PromotionPaths.AsNoTracking()
+            .Where(item => item.StaffCategory == PromotionConstants.SeniorStaff && item.SourceGradeId == employment.GradeId.Value)
+            .Where(item => item.EffectiveFrom <= cycle.EffectivePromotionDate &&
+                           (item.EffectiveTo == null || item.EffectiveTo >= cycle.EffectivePromotionDate))
+            .OrderBy(item => item.Status == PromotionConstants.PathActive ? 0 : 1)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (path is null)
+        {
+            return LiveStatus(
+                employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
+                PromotionConstants.EligibilityNeedsHrReview,
+                [
+                    new("staff-category", "satisfied", PromotionConstants.SeniorStaff),
+                    new("time-in-source-grade", "pending-hr-review"),
+                    new("qualification", "pending-hr-review", QualificationLevels.BachelorOrEquivalent),
+                    new("recognised-institution", "pending-hr-review"),
+                    new("relevant-field", "pending-hr-review"),
+                    new("satisfactory-appraisal", "pending-hr-review")
+                ],
+                PromotionStatusMessages.NoMatchingPath,
+                employment.GradeId, null, currentGrade, null, null,
+                appointmentDate, lastPromotionDate, sourceEffective);
+        }
+
+        var qualifications = await db.EducationRecords.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId && item.QualificationLevel == path.RequiredQualificationLevel)
+            .Select(item => new { item.InstitutionRecognitionStatus, item.RelevantFieldStatus })
+            .ToListAsync(cancellationToken);
+        var qualificationSatisfied = qualifications.Any(item =>
+            item.InstitutionRecognitionStatus == "verified" && item.RelevantFieldStatus == "verified");
+        var qualificationRejected = qualifications.Any(item =>
+            item.InstitutionRecognitionStatus == "rejected" || item.RelevantFieldStatus == "rejected");
+        var appraisals = await db.PerformanceAppraisals.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId)
+            .Select(item => new { item.Outcome, item.ApprovedAt })
+            .ToListAsync(cancellationToken);
+        var evaluation = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
+            staffCategory,
+            path.Status,
+            sourceEffective ?? cycle.EffectivePromotionDate,
+            path.MinimumYearsInSourceGrade,
+            cycle.EffectivePromotionDate,
+            qualificationSatisfied,
+            qualificationRejected,
+            appraisals.Any(item => item.ApprovedAt.HasValue && item.Outcome == "satisfactory"),
+            appraisals.Any(item => item.ApprovedAt.HasValue && item.Outcome == "unsatisfactory")));
+
+        PromotionNextPromotion? nextPromotion = null;
+        if (path.TargetGradeId is Guid targetGradeId)
         {
             var targetGrade = await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == targetGradeId, cancellationToken);
-            if (targetGrade is not null && eligibility is not PromotionConstants.EligibilityNotApplicable)
+            if (targetGrade is not null)
             {
                 nextPromotion = new PromotionNextPromotion(
                     path.Code,
@@ -393,29 +391,60 @@ internal static class PromotionEndpoints
             }
         }
 
-        return new PromotionStatusResponse(
-            employee.StaffId,
-            staffCategory,
-            cycle.CycleYear,
-            cycle.EffectivePromotionDate,
-            PromotionConstants.AssessmentNotAssessed,
-            eligibility,
-            null,
-            null,
-            null,
-            employment?.GradeId,
-            path?.TargetGradeId,
-            DateTimeOffset.UtcNow,
-            criteria,
-            [],
-            nextAction,
-            currentGrade,
-            nextPromotion,
-            eligibility == PromotionConstants.EligibilityPolicyAmbiguity ? path?.SectionReference : null,
-            appointmentDate,
-            lastPromotionDate,
-            sourceEffective);
+        return LiveStatus(
+            employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
+            evaluation.EligibilityState,
+            BuildCriteria(evaluation, path.MinimumYearsInSourceGrade, path.RequiredQualificationLevel),
+            LiveNextAction(evaluation, cycle.CycleYear, path.MinimumYearsInSourceGrade),
+            employment.GradeId, path.TargetGradeId, currentGrade, nextPromotion,
+            evaluation.EligibilityState == PromotionConstants.EligibilityPolicyAmbiguity ? path.SectionReference : null,
+            appointmentDate, lastPromotionDate, sourceEffective);
     }
+
+    private static PromotionStatusResponse LiveStatus(
+        string staffId, string staffCategory, short cycleYear, DateTime effectivePromotionDate,
+        string eligibility, IReadOnlyList<PromotionStatusCriterion> criteria, string nextAction,
+        Guid? sourceGradeId, Guid? targetGradeId, PromotionGradeRef? currentGrade, PromotionNextPromotion? nextPromotion,
+        string? affectedSection, DateTime? appointmentDate, DateTime? lastPromotionDate, DateTime? sourceEffective) =>
+        new(staffId, staffCategory, cycleYear, effectivePromotionDate, PromotionConstants.AssessmentNotAssessed,
+            eligibility, null, null, null, sourceGradeId, targetGradeId, DateTimeOffset.UtcNow, criteria, [],
+            nextAction, currentGrade, nextPromotion, affectedSection, appointmentDate, lastPromotionDate, sourceEffective);
+
+    private static IReadOnlyList<PromotionStatusCriterion> BuildCriteria(
+        PromotionEligibilityEvaluation evaluation, short minimumYears, string? requiredQualification)
+    {
+        if (evaluation.EligibilityState == PromotionConstants.EligibilityNotApplicable)
+            return [new("staff-category", "not-met", PromotionConstants.SeniorStaff)];
+
+        var qualificationStatus = PromotionEligibilityEvaluator.EvidenceCriterionStatus(
+            evaluation.QualificationSatisfied, evaluation.QualificationRejected);
+        var appraisalStatus = PromotionEligibilityEvaluator.EvidenceCriterionStatus(
+            evaluation.AppraisalSatisfied, evaluation.AppraisalRejected);
+        return
+        [
+            new("staff-category", "satisfied", PromotionConstants.SeniorStaff),
+            Criterion("time-in-source-grade", evaluation.BlockingReasons ?? [], evaluation.PendingHrChecks ?? [], "source-grade-service",
+                $"{minimumYears} years"),
+            new("qualification", qualificationStatus, requiredQualification),
+            new("recognised-institution", qualificationStatus),
+            new("relevant-field", qualificationStatus),
+            new("satisfactory-appraisal", appraisalStatus)
+        ];
+    }
+
+    private static string LiveNextAction(PromotionEligibilityEvaluation evaluation, short cycleYear, short requiredYears) =>
+        evaluation.EligibilityState switch
+        {
+            PromotionConstants.EligibilityEligibleForReview => PromotionStatusMessages.EligibleAwaitingAssessment,
+            PromotionConstants.EligibilityNotYetEligible when evaluation.ServiceRequirementMetOn is DateTime metOn =>
+                PromotionStatusMessages.NotYetEligible(requiredYears, metOn, cycleYear),
+            PromotionConstants.EligibilityNotYetEligible => PromotionStatusMessages.NoCycleOpen,
+            PromotionConstants.EligibilityPolicyAmbiguity => PromotionStatusMessages.PolicyAmbiguity,
+            PromotionConstants.EligibilityNeedsHrReview => PromotionStatusMessages.NeedsHrReview,
+            PromotionConstants.EligibilityNotEligible => PromotionStatusMessages.NotEligible,
+            PromotionConstants.EligibilityNotApplicable => PromotionStatusMessages.SeniorStaffOnly,
+            _ => PromotionStatusMessages.AwaitHrAssessment
+        };
 
     private static IQueryable<PromotionStatusResponse> StatusQuery(SpmeDbContext db, HttpContext context, short? cycleYear, Guid? employeeId = null)
     {
@@ -459,7 +488,9 @@ internal static class PromotionEndpoints
             {
                 Criteria = [],
                 AvailableActions = [],
-                NextAction = "Await HR assessment for the current promotion cycle.",
+                NextAction = status.StaffCategory is StaffCategories.SeniorMember or StaffCategories.JuniorStaff
+                    ? PromotionStatusMessages.ForStaffCategory(status.StaffCategory)
+                    : PromotionStatusMessages.AwaitHrAssessment,
                 AppointmentDate = appointmentDate,
                 LastPromotionDate = lastPromotionDate,
                 SourceGradeEffectiveDate = sourceGradeEffectiveDate
@@ -471,7 +502,7 @@ internal static class PromotionEndpoints
         if (assessment is null)
             return status with
             {
-                Criteria = [], AvailableActions = [], NextAction = "Await HR assessment for the current promotion cycle.",
+                Criteria = [], AvailableActions = [], NextAction = PromotionStatusMessages.AwaitHrAssessment,
                 AppointmentDate = appointmentDate, LastPromotionDate = lastPromotionDate,
                 SourceGradeEffectiveDate = sourceGradeEffectiveDate
             };
@@ -498,7 +529,10 @@ internal static class PromotionEndpoints
         var affectedSection = eligibility == PromotionConstants.EligibilityPolicyAmbiguity
             ? path?.SectionReference
             : null;
-        var criteria = eligibility == PromotionConstants.EligibilityNotApplicable
+        var snapshot = TryReadEvaluation(assessment.EligibilitySnapshotJson);
+        var criteria = snapshot is not null
+            ? BuildCriteria(snapshot, path?.MinimumYearsInSourceGrade ?? 0, path?.RequiredQualificationLevel).ToList()
+            : eligibility == PromotionConstants.EligibilityNotApplicable
             ? new List<PromotionStatusCriterion>
             {
                 new("staff-category", "not-met", PromotionConstants.SeniorStaff)
@@ -528,17 +562,18 @@ internal static class PromotionEndpoints
         var nextAction = eligibility switch
         {
             PromotionConstants.EligibilityEligibleForReview when actions.Contains("start-promotion-submission") =>
-                "Start a promotion submission for this cycle.",
+                PromotionStatusMessages.EligibleStartSubmission,
             PromotionConstants.EligibilityEligibleForReview when actions.Contains("edit") =>
-                "Complete the required reports, documents, and declarations.",
-            PromotionConstants.EligibilityEligibleForReview => "Wait for HR to review the submitted promotion case.",
-            PromotionConstants.EligibilityNotYetEligible => "Await the next eligible promotion cycle.",
-            PromotionConstants.EligibilityPolicyAmbiguity =>
-                "This path needs an approved policy confirmation before a submission can start.",
-            PromotionConstants.EligibilityNeedsHrReview => "HR still needs to verify remaining evidence.",
-            PromotionConstants.EligibilityNotEligible => "This assessment does not currently qualify for review.",
-            PromotionConstants.EligibilityNotApplicable => "Promotion self-service applies to Senior Staff only.",
-            _ => "Await HR assessment for the current promotion cycle."
+                PromotionStatusMessages.EligibleCompleteRequirements,
+            PromotionConstants.EligibilityEligibleForReview => PromotionStatusMessages.EligibleWaitForHr,
+            PromotionConstants.EligibilityNotYetEligible when assessment.ServiceRequirementMetOn is DateTime metOn =>
+                PromotionStatusMessages.NotYetEligible(path?.MinimumYearsInSourceGrade ?? 0, metOn, status.CycleYear),
+            PromotionConstants.EligibilityNotYetEligible => PromotionStatusMessages.NoCycleOpen,
+            PromotionConstants.EligibilityPolicyAmbiguity => PromotionStatusMessages.PolicyAmbiguity,
+            PromotionConstants.EligibilityNeedsHrReview => PromotionStatusMessages.NeedsHrReview,
+            PromotionConstants.EligibilityNotEligible => PromotionStatusMessages.NotEligible,
+            PromotionConstants.EligibilityNotApplicable => PromotionStatusMessages.ForStaffCategory(status.StaffCategory),
+            _ => PromotionStatusMessages.AwaitHrAssessment
         };
 
         return status with
@@ -592,7 +627,22 @@ internal static class PromotionEndpoints
     }
 
     private static bool IsSupportedStaffCategory(string staffCategory) =>
-        string.Equals(staffCategory.Trim(), PromotionConstants.SeniorStaff, StringComparison.OrdinalIgnoreCase);
+        StaffCategories.All.Contains(staffCategory.Trim(), StringComparer.OrdinalIgnoreCase);
+
+    private static PromotionEligibilityEvaluation? TryReadEvaluation(string json)
+    {
+        try
+        {
+            var evaluation = JsonSerializer.Deserialize<PromotionEligibilityEvaluation>(json);
+            if (evaluation is null || evaluation.BlockingReasons is null || evaluation.PendingHrChecks is null)
+                return null;
+            return evaluation;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private static bool HasInstituteAccess(HttpContext context, Guid instituteId) =>
         !CurrentInstituteId(context).HasValue || CurrentInstituteId(context) == instituteId;

@@ -66,19 +66,19 @@ jobs:
       - name: Smoke test health endpoint
         shell: pwsh
         run: |
-          $endpoints = @(
-            "http://csir.runasp.net/health",
-            "https://csir.runasp.net/health"
-          )
-          foreach ($uri in $endpoints) {
+          $deadline = (Get-Date).AddMinutes(3)
+          $uri = "http://csir.runasp.net/health"
+          do {
             try {
-              $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 60
+              $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 30
               if ($response.StatusCode -eq 200) {
                 Write-Host "Health check passed at $uri"
                 exit 0
               }
+              Write-Host "Health check returned $($response.StatusCode) at $uri"
             } catch {
-              Write-Host "Health check failed at ${uri}: $($_.Exception.Message)"
+              Write-Host "$(Get-Date -Format o) Health check not ready at ${uri}: $($_.Exception.Message)"
             }
-          }
-          throw "Health check failed on both HTTP and HTTPS"
+            Start-Sleep -Seconds 10
+          } while ((Get-Date) -lt $deadline)
+          throw "Health check failed at $uri after waiting for IIS to recycle"

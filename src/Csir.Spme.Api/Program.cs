@@ -220,7 +220,9 @@ builder.Services.AddHealthChecks()
 if (!isOpenApiDocumentGeneration)
 {
     builder.Services.AddHostedService<IdentitySeedHostedService>();
+    builder.Services.AddHostedService<PromotionCatalogSeedHostedService>();
     builder.Services.AddHostedService<PromotionRequirementTemplateSeedHostedService>();
+    builder.Services.AddHostedService<PromotionDemoStaffSeedHostedService>();
 }
 
 builder.Services.AddOutputCache(options =>

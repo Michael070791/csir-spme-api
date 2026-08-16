@@ -42,7 +42,9 @@ internal static class Program
         };
 
         await using var target = new SpmeDbContext(
-            new DbContextOptionsBuilder<SpmeDbContext>().UseSqlServer(options.TargetConnectionString).Options);
+            new DbContextOptionsBuilder<SpmeDbContext>()
+                .UseSqlServer(options.TargetConnectionString, sql => sql.CommandTimeout(0))
+                .Options);
 
         var importer = new LegacyImporter(options, target);
         await importer.RunAsync(cancellation.Token);
@@ -181,8 +183,6 @@ internal sealed partial class LegacyImporter
 
     public async Task RunAsync(CancellationToken cancellationToken)
     {
-        await using var importTransaction = await _target.Database.BeginTransactionAsync(cancellationToken);
-
         var sourceBackupSha256 = await HashSourcesAsync();
         var sourceName = LegacyImportSourceName.Derive(_options.AuthBackupPath, _options.SpmeBackupPath);
         _run = new LegacyImportRun(
@@ -193,6 +193,10 @@ internal sealed partial class LegacyImporter
 
         _target.LegacyImportRuns.Add(_run);
         await SaveIfApplyAsync();
+
+        Microsoft.EntityFrameworkCore.Storage.IDbContextTransaction? importTransaction = null;
+        if (!_options.Apply)
+            importTransaction = await _target.Database.BeginTransactionAsync(cancellationToken);
 
         try
         {
@@ -223,7 +227,6 @@ internal sealed partial class LegacyImporter
                     _run.RecordReconciliation(priorCompletedRun.ReconciliationJson);
                     _run.Complete($"No-op: source backup was already applied successfully by run {priorCompletedRun.Id}.");
                     await SaveIfApplyAsync();
-                    await importTransaction.CommitAsync(cancellationToken);
                     Console.WriteLine($"apply completed as an idempotent no-op. Source rows: {_run.SourceRowCount}; inserted: 0; updated: 0; issues: 0.");
                     return;
                 }
@@ -247,14 +250,23 @@ internal sealed partial class LegacyImporter
 
             _run.Complete(_options.Apply ? "Legacy import applied." : "Legacy import dry-run completed.");
             await SaveIfApplyAsync();
-            if (_options.Apply)
-                await importTransaction.CommitAsync(cancellationToken);
-            else
-                await importTransaction.RollbackAsync(cancellationToken);
+            if (!_options.Apply)
+                await importTransaction!.RollbackAsync(cancellationToken);
         }
         catch (Exception ex)
         {
-            await importTransaction.RollbackAsync(CancellationToken.None);
+            if (importTransaction is not null)
+            {
+                try
+                {
+                    await importTransaction.RollbackAsync(CancellationToken.None);
+                }
+                catch (InvalidOperationException)
+                {
+                    // Remote hosts may abort long transactions before client rollback completes.
+                }
+            }
+
             _target.ChangeTracker.Clear();
             if (_options.Apply)
             {
@@ -267,7 +279,13 @@ internal sealed partial class LegacyImporter
                 _target.LegacyImportRuns.Add(failedRun);
                 await _target.SaveChangesAsync(CancellationToken.None);
             }
+
             throw;
+        }
+        finally
+        {
+            if (importTransaction is not null)
+                await importTransaction.DisposeAsync();
         }
 
         Console.WriteLine($"{_run.Mode} completed. Source rows: {_run.SourceRowCount}; inserted: {_run.TargetInsertedCount}; updated: {_run.TargetUpdatedCount}; issues: {_run.IssueCount}.");

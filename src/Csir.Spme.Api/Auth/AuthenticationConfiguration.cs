@@ -154,6 +154,11 @@ public static class AuthenticationConfiguration
                     ctx, SpmePermissions.PromotionsApprove, SpmeRoles.PlatformAdmin, SpmeRoles.HrAdmin)))
             .AddPolicy(AuthorizationPolicies.ReadOwnPromotionStatus, policy =>
                 policy.RequireRole(SpmeRoles.Employee))
+            .AddPolicy(AuthorizationPolicies.ReadVisiblePromotionSubmission, policy =>
+                policy.RequireAssertion(ctx =>
+                    ctx.User.IsInRole(SpmeRoles.Employee) ||
+                    HasAnyRole(ctx, SpmeRoles.PlatformAdmin, SpmeRoles.InstituteAdmin, SpmeRoles.HrAdmin) ||
+                    InstituteStaffAccess.HasStaffManagementReadCompatibility(ctx.User)))
             .AddPolicy(AuthorizationPolicies.ReadPromotionReports, policy =>
                 policy.RequireAssertion(ctx =>
                     HasPermissionOrRole(

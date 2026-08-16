@@ -39,13 +39,16 @@ public sealed class PromotionEligibilityEvaluatorTests
     }
 
     [Fact]
-    public void Evaluate_Does_Not_Treat_Unverified_Evidence_As_Satisfied()
+    public void Evaluate_Treats_Verified_Degree_Or_Satisfactory_Appraisal_As_Evidence()
     {
-        var pending = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
-            PromotionConstants.SeniorStaff, PromotionConstants.PathActive, new DateTime(2020, 1, 1), 4, new DateTime(2026, 1, 1), false, false, false, false));
-        var rejected = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
-            PromotionConstants.SeniorStaff, PromotionConstants.PathActive, new DateTime(2020, 1, 1), 4, new DateTime(2026, 1, 1), true, false, false, true));
+        var degreeOnly = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: true, appraisalSatisfied: false));
+        var appraisalOnly = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: false, appraisalSatisfied: true));
+        var pending = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: false, appraisalSatisfied: false));
+        var rejected = PromotionEligibilityEvaluator.Evaluate(Facts(
+            qualificationSatisfied: false, qualificationRejected: true, appraisalSatisfied: false, appraisalRejected: true));
 
+        degreeOnly.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
+        appraisalOnly.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
         pending.EligibilityState.Should().Be(PromotionConstants.EligibilityNeedsHrReview);
         rejected.EligibilityState.Should().Be(PromotionConstants.EligibilityNotEligible);
     }
@@ -53,5 +56,13 @@ public sealed class PromotionEligibilityEvaluatorTests
     private static PromotionEligibilityEvaluation Evaluate(DateTime sourceGradeDate, DateTime cycleDate, short requiredYears) =>
         PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
             PromotionConstants.SeniorStaff, PromotionConstants.PathActive, sourceGradeDate, requiredYears, cycleDate,
-            true, false, true, false));
+            true, false, false, false));
+
+    private static PromotionEligibilityFacts Facts(
+        bool qualificationSatisfied,
+        bool appraisalSatisfied,
+        bool qualificationRejected = false,
+        bool appraisalRejected = false) =>
+        new(PromotionConstants.SeniorStaff, PromotionConstants.PathActive, new DateTime(2020, 1, 1), 4, new DateTime(2026, 1, 1),
+            qualificationSatisfied, qualificationRejected, appraisalSatisfied, appraisalRejected);
 }
