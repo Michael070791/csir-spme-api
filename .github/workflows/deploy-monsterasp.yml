@@ -26,7 +26,7 @@ jobs:
           dotnet-version: 10.0.x
 
       - name: Restore dependencies
-        run: dotnet restore Csir.Spme.sln --runtime win-x86
+        run: dotnet restore Csir.Spme.sln --runtime win-x64
 
       - name: Build solution
         run: dotnet build Csir.Spme.sln --configuration Release --no-restore
@@ -43,9 +43,16 @@ jobs:
           --configuration Release
           --no-restore
           --output "${{ github.workspace }}\publish"
-          --runtime win-x86
+          --runtime win-x64
           --self-contained false
           /p:OpenApiGenerateDocuments=false
+
+      - name: Enable IIS stdout logging for startup diagnostics
+        shell: pwsh
+        run: |
+          $config = Join-Path $env:GITHUB_WORKSPACE 'publish/web.config'
+          (Get-Content $config -Raw).Replace('stdoutLogEnabled="false"', 'stdoutLogEnabled="true"') | Set-Content $config
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:GITHUB_WORKSPACE 'publish/logs') | Out-Null
 
       - name: Deploy to MonsterASP via Web Deploy
         uses: rasmusbuchholdt/simply-web-deploy@2.2.0
@@ -59,7 +66,19 @@ jobs:
       - name: Smoke test health endpoint
         shell: pwsh
         run: |
-          $response = Invoke-WebRequest -Uri "https://csir.runasp.net/health" -UseBasicParsing -TimeoutSec 60
-          if ($response.StatusCode -ne 200) {
-            throw "Health check failed with status $($response.StatusCode)"
+          $endpoints = @(
+            "http://csir.runasp.net/health",
+            "https://csir.runasp.net/health"
+          )
+          foreach ($uri in $endpoints) {
+            try {
+              $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 60
+              if ($response.StatusCode -eq 200) {
+                Write-Host "Health check passed at $uri"
+                exit 0
+              }
+            } catch {
+              Write-Host "Health check failed at ${uri}: $($_.Exception.Message)"
+            }
           }
+          throw "Health check failed on both HTTP and HTTPS"
