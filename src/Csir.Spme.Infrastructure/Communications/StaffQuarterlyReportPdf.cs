@@ -5,6 +5,14 @@ namespace Csir.Spme.Infrastructure.Communications;
 
 public static class StaffQuarterlyReportPdf
 {
+    public static byte[] BuildSimpleReport(string title, IReadOnlyList<string> lines)
+    {
+        var content = new List<string> { "CSIR SPME", title, string.Empty };
+        content.AddRange(lines);
+        var wrapped = content.SelectMany(Wrap).ToList();
+        return BuildFromLines(wrapped);
+    }
+
     public static byte[] Build(StaffQuarterlyReportNotification notification)
     {
         var lines = new List<string>
@@ -83,6 +91,11 @@ public static class StaffQuarterlyReportPdf
             : string.Join(", ", notification.ImageFileNames));
 
         var wrapped = lines.SelectMany(Wrap).ToList();
+        return BuildFromLines(wrapped);
+    }
+
+    private static byte[] BuildFromLines(IReadOnlyList<string> wrapped)
+    {
         const int linesPerPage = 46;
         var pageCount = Math.Max(1, (int)Math.Ceiling(wrapped.Count / (double)linesPerPage));
         var pages = Enumerable.Range(0, pageCount)

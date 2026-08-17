@@ -31,11 +31,12 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
     public async Task Skeletal_staff_request_moves_from_draft_to_credited_with_an_allowance_report()
     {
         var seed = await SeedAsync();
-        var employee = Client(CreateToken(SpmeRoles.Employee, seed.InstituteA, seed.EmployeeId));
+        var employee = Client(CreateToken(SpmeRoles.Employee, seed.InstituteA, seed.EmployeeId, seed.EmployeeUserId));
         var hr = Client(CreateToken(SpmeRoles.HrAdmin, seed.InstituteA, null, seed.HrUserId));
-        var sectionHead = Client(CreateToken(SpmeRoles.HeadOfSection, seed.InstituteA, seed.SectionHeadEmployeeId));
-        var divisionHead = Client(CreateToken(SpmeRoles.HeadOfDivision, seed.InstituteA, seed.DivisionHeadEmployeeId));
-        var instituteDirector = Client(CreateToken(SpmeRoles.InstituteDirector, seed.InstituteA));
+        var sectionHead = Client(CreateToken(SpmeRoles.HeadOfSection, seed.InstituteA, seed.SectionHeadEmployeeId, seed.SectionHeadUserId));
+        var divisionHead = Client(CreateToken(SpmeRoles.HeadOfDivision, seed.InstituteA, seed.DivisionHeadEmployeeId, seed.DivisionHeadUserId));
+        var headOfAdmin = Client(CreateToken(SpmeRoles.HeadOfAdmin, seed.InstituteA, seed.HeadOfAdminEmployeeId, seed.HeadOfAdminUserId));
+        var instituteDirector = Client(CreateToken(SpmeRoles.InstituteDirector, seed.InstituteA, seed.InstituteDirectorEmployeeId, seed.InstituteDirectorUserId));
         var otherHr = Client(CreateToken(SpmeRoles.HrAdmin, seed.InstituteB));
         var today = DateTime.UtcNow.Date;
 
@@ -67,14 +68,14 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         submitted!.Status.Should().Be(SkeletalStaffRequestStatuses.Submitted);
         var etag = submittedResponse.Headers.ETag!.Tag!;
 
-        var stageApprovers = new[] { sectionHead, divisionHead, instituteDirector };
+        var stageApprovers = new[] { sectionHead, divisionHead, headOfAdmin, instituteDirector };
         using (var hrCannotDecide = Request(HttpMethod.Post, $"/api/v2/skeletal-staff-requests/{draft.Id}/approve", etag,
             new SkeletalStaffDecisionRequest("HR cannot replace the assigned stage approver.")))
         {
             (await hr.SendAsync(hrCannotDecide)).StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
 
-        for (var stage = 0; stage < LeaveApprovalStages.DefaultChain.Length; stage++)
+        for (var stage = 0; stage < SkeletalStaffApprovalStages.DefaultChain.Length; stage++)
         {
             using var approve = Request(HttpMethod.Post, $"/api/v2/skeletal-staff-requests/{draft.Id}/approve", etag,
                 new SkeletalStaffDecisionRequest($"Approved stage {stage + 1}."));
@@ -116,8 +117,41 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var balance = await db.LeaveBalances.SingleAsync(x => x.EmployeeId == seed.EmployeeId && x.LeaveType == LeaveTypes.Annual && x.LeaveYear == today.Year);
         balance.AdjustedDays.Should().Be(4m);
         var approvals = await db.SkeletalStaffApprovals.Where(x => x.SkeletalStaffRequestId == draft.Id).ToListAsync();
-        approvals.Should().HaveCount(LeaveApprovalStages.DefaultChain.Length);
-        approvals.Should().OnlyContain(approval => approval.ApproverUserId == null);
+        approvals.Should().HaveCount(SkeletalStaffApprovalStages.DefaultChain.Length);
+        approvals.Should().OnlyContain(approval => approval.ApproverUserId.HasValue);
+    }
+
+    [Fact]
+    public async Task Skeletal_staff_submit_fails_when_head_of_admin_is_not_assigned()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+        var suffix = Guid.NewGuid().ToString("N")[..8];
+        var institute = new Institute($"SKC-{suffix}", $"Skeletal Institute C {suffix}", "Institute");
+        var employee = new Employee(institute.Id, $"SKC-{suffix}", "Casey", "female");
+        var division = new Division(institute.Id, $"Division C {suffix}");
+        var section = new Section(division.Id, $"Section C {suffix}");
+        var today = DateTime.UtcNow.Date;
+        var period = HolidayPeriod.Create(
+            ScopeTypes.Institute, institute.Id, (short)today.Year,
+            today, today.AddDays(2), today.AddDays(3), today.AddDays(5),
+            today.AddDays(-1), today.AddDays(7), 4, HolidayPeriodStatuses.Open, null).Value!;
+        db.Institutes.Add(institute);
+        db.Divisions.Add(division);
+        db.Sections.Add(section);
+        db.Employees.Add(employee);
+        db.EmploymentRecords.Add(new EmploymentRecord(
+            employee.Id, institute.Id, division.Id, section.Id, null, null, null,
+            "senior-staff", "active", null, null, null, null, null, today, true));
+        db.HolidayPeriods.Add(period);
+        await db.SaveChangesAsync();
+
+        var client = Client(CreateToken(SpmeRoles.Employee, institute.Id, employee.Id));
+        var create = await client.PostAsJsonAsync("/api/v2/skeletal-staff-requests", new CreateSkeletalStaffRequest(
+            period.Id, [today], "Casey Mensah", null, true));
+        var draft = await create.Content.ReadFromJsonAsync<SkeletalStaffRequestResponse>();
+        using var submit = Request(HttpMethod.Post, $"/api/v2/skeletal-staff-requests/{draft!.Id}/submit", create.Headers.ETag!.Tag!, null);
+        (await client.SendAsync(submit)).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
     }
 
     [Fact]
@@ -176,6 +210,42 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var section = new Section(division.Id, $"Skeletal Section {suffix}");
         var sectionHeadEmployee = new Employee(instituteA.Id, $"SK-SH-{suffix}", "Section Head", "unknown");
         var divisionHeadEmployee = new Employee(instituteA.Id, $"SK-DH-{suffix}", "Division Head", "unknown");
+        var headOfAdminEmployee = new Employee(instituteA.Id, $"SK-HA-{suffix}", "Head of Admin", "unknown");
+        var instituteDirectorEmployee = new Employee(instituteA.Id, $"SK-ID-{suffix}", "Institute Director", "unknown");
+        sectionHeadEmployee.UpdateImportedProfile(null, null, null, null, null, null, $"section.head.{suffix}@example.test", null, true);
+        divisionHeadEmployee.UpdateImportedProfile(null, null, null, null, null, null, $"division.head.{suffix}@example.test", null, true);
+        headOfAdminEmployee.UpdateImportedProfile(null, null, null, null, null, null, $"head.admin.{suffix}@example.test", null, true);
+        instituteDirectorEmployee.UpdateImportedProfile(null, null, null, null, null, null, $"director.{suffix}@example.test", null, true);
+        var employeeUser = new User($"skeletal.employee.{suffix}", SpmeRoles.Employee)
+        {
+            Email = $"employee.{suffix}@example.test",
+            EmailConfirmed = true
+        };
+        employeeUser.LinkEmployee(employee.Id, instituteA.Id);
+        var sectionHeadUser = new User($"skeletal.section.{suffix}", SpmeRoles.Employee)
+        {
+            Email = sectionHeadEmployee.PrimaryEmail,
+            EmailConfirmed = true
+        };
+        sectionHeadUser.LinkEmployee(sectionHeadEmployee.Id, instituteA.Id);
+        var divisionHeadUser = new User($"skeletal.division.{suffix}", SpmeRoles.Employee)
+        {
+            Email = divisionHeadEmployee.PrimaryEmail,
+            EmailConfirmed = true
+        };
+        divisionHeadUser.LinkEmployee(divisionHeadEmployee.Id, instituteA.Id);
+        var headOfAdminUser = new User($"skeletal.hoa.{suffix}", SpmeRoles.Employee)
+        {
+            Email = headOfAdminEmployee.PrimaryEmail,
+            EmailConfirmed = true
+        };
+        headOfAdminUser.LinkEmployee(headOfAdminEmployee.Id, instituteA.Id);
+        var instituteDirectorUser = new User($"skeletal.director.{suffix}", SpmeRoles.Employee)
+        {
+            Email = instituteDirectorEmployee.PrimaryEmail,
+            EmailConfirmed = true
+        };
+        instituteDirectorUser.LinkEmployee(instituteDirectorEmployee.Id, instituteA.Id);
         var hrUser = new User($"skeletal.hr.{suffix}", "HrAdmin");
         hrUser.AssignInstitute(instituteA.Id);
         var today = DateTime.UtcNow.Date;
@@ -187,19 +257,41 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         db.Institutes.AddRange(instituteA, instituteB);
         db.Divisions.Add(division);
         db.Sections.Add(section);
-        db.Employees.AddRange(employee, sectionHeadEmployee, divisionHeadEmployee);
+        db.Employees.AddRange(employee, sectionHeadEmployee, divisionHeadEmployee, headOfAdminEmployee, instituteDirectorEmployee);
         db.EmploymentRecords.AddRange(
             new EmploymentRecord(employee.Id, instituteA.Id, division.Id, section.Id, null, null, null,
                 "senior-staff", "active", null, null, null, null, null, today, true),
             new EmploymentRecord(sectionHeadEmployee.Id, instituteA.Id, division.Id, section.Id, null, null,
                 "head-of-section", "senior-staff", "active", null, null, null, null, null, today, true),
             new EmploymentRecord(divisionHeadEmployee.Id, instituteA.Id, division.Id, null, null, null,
-                "head-of-division", "senior-staff", "active", null, null, null, null, null, today, true));
-        db.Users.Add(hrUser);
+                "head-of-division", "senior-staff", "active", null, null, null, null, null, today, true),
+            new EmploymentRecord(headOfAdminEmployee.Id, instituteA.Id, division.Id, null, null, null,
+                "admin-director", "senior-staff", "active", null, null, null, null, null, today, true),
+            new EmploymentRecord(instituteDirectorEmployee.Id, instituteA.Id, division.Id, null, null, null,
+                "institute-director", "senior-staff", "active", null, null, null, null, null, today, true));
+        db.Users.AddRange(employeeUser, sectionHeadUser, divisionHeadUser, headOfAdminUser, instituteDirectorUser, hrUser);
         db.HolidayPeriods.Add(period);
         await db.SaveChangesAsync();
-        return new Seed(instituteA.Id, instituteB.Id, employee.Id, sectionHeadEmployee.Id,
-            divisionHeadEmployee.Id, hrUser.Id, period.Id);
+
+        await EnsureRoleAsync(db, sectionHeadUser.Id, SpmeRoles.HeadOfSection);
+        await EnsureRoleAsync(db, divisionHeadUser.Id, SpmeRoles.HeadOfDivision);
+        await EnsureRoleAsync(db, headOfAdminUser.Id, SpmeRoles.HeadOfAdmin);
+        await EnsureRoleAsync(db, instituteDirectorUser.Id, SpmeRoles.InstituteDirector);
+        await db.SaveChangesAsync();
+
+        return new Seed(instituteA.Id, instituteB.Id, employee.Id, employeeUser.Id, sectionHeadEmployee.Id,
+            sectionHeadUser.Id, divisionHeadEmployee.Id, divisionHeadUser.Id, headOfAdminEmployee.Id,
+            headOfAdminUser.Id, instituteDirectorEmployee.Id, instituteDirectorUser.Id, hrUser.Id, period.Id);
+    }
+
+    private static async Task EnsureRoleAsync(SpmeDbContext db, Guid userId, string roleName)
+    {
+        var role = await db.Roles.SingleOrDefaultAsync(item => item.Name == roleName) ??
+            new Role(roleName.ToLowerInvariant(), roleName, roleName, true);
+        if (db.Entry(role).State == EntityState.Detached)
+            db.Roles.Add(role);
+        if (!await db.UserRoles.AnyAsync(item => item.UserId == userId && item.RoleId == role.Id))
+            db.UserRoles.Add(new Microsoft.AspNetCore.Identity.IdentityUserRole<Guid> { UserId = userId, RoleId = role.Id });
     }
 
     private HttpClient Client(string token)
@@ -244,8 +336,15 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         Guid InstituteA,
         Guid InstituteB,
         Guid EmployeeId,
+        Guid EmployeeUserId,
         Guid SectionHeadEmployeeId,
+        Guid SectionHeadUserId,
         Guid DivisionHeadEmployeeId,
+        Guid DivisionHeadUserId,
+        Guid HeadOfAdminEmployeeId,
+        Guid HeadOfAdminUserId,
+        Guid InstituteDirectorEmployeeId,
+        Guid InstituteDirectorUserId,
         Guid HrUserId,
         Guid HolidayPeriodId);
 }

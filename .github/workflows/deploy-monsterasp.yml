@@ -37,6 +37,16 @@ jobs:
           --configuration Release --no-build
           --filter FullyQualifiedName~DocumentationEndpointTests
 
+      - name: Apply database migrations
+        env:
+          ConnectionStrings__DefaultConnection: ${{ secrets.MONSTERASP_MIGRATION_CONNECTION_STRING }}
+          DatabaseProvider__UseSqlite: "false"
+          DatabaseMigration__Apply: "true"
+          DatabaseMigration__ConnectionTimeoutSeconds: "120"
+        run: >
+          dotnet run --project tools/Csir.Spme.Tools.DatabaseMigrator/Csir.Spme.Tools.DatabaseMigrator.csproj
+          --configuration Release --no-build
+
       - name: Publish Web API for IIS
         run: >
           dotnet publish src/Csir.Spme.Api/Csir.Spme.Api.csproj
@@ -63,22 +73,31 @@ jobs:
           server-password: ${{ secrets.SERVER_PASSWORD }}
           source-path: '\publish\'
 
-      - name: Smoke test health endpoint
+      - name: Smoke test health and readiness
         shell: pwsh
         run: |
           $deadline = (Get-Date).AddMinutes(3)
-          $uri = "http://csir.runasp.net/health"
-          do {
-            try {
-              $response = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 30
-              if ($response.StatusCode -eq 200) {
-                Write-Host "Health check passed at $uri"
-                exit 0
+          $checks = @(
+            @{ Name = "health"; Uri = "http://csir.runasp.net/health" },
+            @{ Name = "readiness"; Uri = "http://csir.runasp.net/readyz" }
+          )
+          foreach ($check in $checks) {
+            $passed = $false
+            do {
+              try {
+                $response = Invoke-WebRequest -Uri $check.Uri -UseBasicParsing -TimeoutSec 30
+                if ($response.StatusCode -eq 200) {
+                  Write-Host "$($check.Name) check passed at $($check.Uri)"
+                  $passed = $true
+                  break
+                }
+                Write-Host "$($check.Name) check returned $($response.StatusCode) at $($check.Uri)"
+              } catch {
+                Write-Host "$(Get-Date -Format o) $($check.Name) check not ready at $($check.Uri): $($_.Exception.Message)"
               }
-              Write-Host "Health check returned $($response.StatusCode) at $uri"
-            } catch {
-              Write-Host "$(Get-Date -Format o) Health check not ready at ${uri}: $($_.Exception.Message)"
+              Start-Sleep -Seconds 10
+            } while ((Get-Date) -lt $deadline)
+            if (-not $passed) {
+              throw "$($check.Name) check failed at $($check.Uri) after waiting for IIS to recycle"
             }
-            Start-Sleep -Seconds 10
-          } while ((Get-Date) -lt $deadline)
-          throw "Health check failed at $uri after waiting for IIS to recycle"
+          }

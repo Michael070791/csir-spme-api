@@ -13,6 +13,7 @@ using Csir.Spme.Application.Promotions;
 using Csir.Spme.Application.Reporting;
 using Csir.Spme.Application.Hr;
 using Csir.Spme.Infrastructure.Identity;
+using Csir.Spme.Infrastructure.Workflow;
 
 namespace Csir.Spme.Infrastructure;
 
@@ -204,6 +205,8 @@ public static class DependencyInjection
         }).RemoveAllLoggers();
         services.AddScoped<ICommunicationOutbox, DurableCommunicationOutbox>();
         services.AddScoped<IWorkflowNotificationOutbox, WorkflowNotificationOutbox>();
+        services.AddScoped<IWorkflowApprovalTokenService, WorkflowApprovalTokenService>();
+        services.AddScoped<IWorkflowApproverResolver, WorkflowApproverResolver>();
         services.AddScoped<IEmailService, DurableEmailService>();
         services.AddScoped<ISmsService, DurableSmsService>();
         services.AddHostedService<CommunicationOutboxDispatcher>();

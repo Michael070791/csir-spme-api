@@ -11,7 +11,9 @@ namespace Csir.Spme.Infrastructure.Communications;
 
 public sealed class WorkflowNotificationOutbox(
     SpmeDbContext db,
-    BrandedEmailRenderer renderer) : IWorkflowNotificationOutbox
+    BrandedEmailRenderer renderer,
+    IWorkflowApprovalTokenService tokenService,
+    IWorkflowApproverResolver approverResolver) : IWorkflowNotificationOutbox
 {
     private const string ReportSubmittedEventType = "report.submitted.v1";
     private const string LeaveApprovedEventType = "leave.approved.v1";
@@ -214,13 +216,19 @@ public sealed class WorkflowNotificationOutbox(
                     .Where(value => !string.IsNullOrWhiteSpace(value)));
         }
 
-        foreach (var approver in await FindStageApproversAsync(instituteId, employeeId, approvalStage, ct))
+        foreach (var approver in await approverResolver.FindStageApproversAsync(instituteId, employeeId, approvalStage, ct))
         {
+            var issued = await tokenService.IssueAsync(
+                WorkflowApprovalPurposes.Leave,
+                leaveRequestId,
+                approver.UserId,
+                approvalStage,
+                ct);
             db.Notifications.Add(new Notification(
                 approver.UserId,
                 "Leave request awaiting approval",
                 $"{staffName} submitted a leave request that needs your review.",
-                $"/leave/{leaveRequestId:D}"));
+                $"/approvals/leave?token={issued.RawToken}"));
             var rendered = renderer.LeaveAwaitingApproval(
                 approver.DisplayName,
                 staffName,
@@ -229,7 +237,8 @@ public sealed class WorkflowNotificationOutbox(
                 startDate,
                 endDate,
                 workingDays,
-                leaveRequestId);
+                leaveRequestId,
+                issued.RawToken);
             await StageEmailAsync(
                 approver.Email,
                 rendered.Subject,
@@ -238,6 +247,16 @@ public sealed class WorkflowNotificationOutbox(
                 "leave-pending-approval",
                 $"leave-pending-approval:{leaveRequestId:N}:{approvalStage}:{DestinationKey(approver.Email)}",
                 ct);
+
+            if (!string.IsNullOrWhiteSpace(approver.Phone))
+            {
+                var portalLink = $"{renderer.StaffPortalUrl.TrimEnd('/')}/approvals/leave";
+                await StageAsync(new CommunicationOutboxMessage(
+                    "sms", approver.Phone, null,
+                    $"{staffName} submitted a leave request for your approval. Sign in on the staff portal: {portalLink}",
+                    false, "leave-pending-approval",
+                    $"leave-pending-approval-sms:{leaveRequestId:N}:{approvalStage}:{DestinationKey(approver.Phone)}"), ct);
+            }
         }
     }
 
@@ -445,68 +464,141 @@ public sealed class WorkflowNotificationOutbox(
         }
     }
 
-    private async Task<IReadOnlyList<(Guid UserId, string Email, string DisplayName)>> FindStageApproversAsync(
+    public async Task StageSkeletalStaffAwaitingApprovalAsync(
+        Guid requestId,
         Guid instituteId,
         Guid employeeId,
         string approvalStage,
-        CancellationToken ct)
+        IReadOnlyList<DateTime> selectedDates,
+        CancellationToken ct = default)
     {
-        var roleName = approvalStage switch
+        var staffName = await EmployeeDisplayNameAsync(employeeId, ct);
+        foreach (var approver in await approverResolver.FindStageApproversAsync(instituteId, employeeId, approvalStage, ct))
         {
-            LeaveApprovalStages.SectionHead => "HeadOfSection",
-            LeaveApprovalStages.HeadOfDivision => "HeadOfDivision",
-            LeaveApprovalStages.InstituteDirector => "InstituteDirector",
-            _ => null
-        };
-        if (roleName is null)
-            return [];
+            var issued = await tokenService.IssueAsync(
+                WorkflowApprovalPurposes.SkeletalStaff,
+                requestId,
+                approver.UserId,
+                approvalStage,
+                ct);
+            db.Notifications.Add(new Notification(
+                approver.UserId,
+                "Skeletal staff request awaiting approval",
+                $"{staffName} submitted a skeletal staff request that needs your review.",
+                $"/approvals/skeletal-staff?token={issued.RawToken}"));
+            var rendered = renderer.SkeletalStaffAwaitingApproval(
+                approver.DisplayName,
+                staffName,
+                approvalStage,
+                selectedDates,
+                requestId,
+                issued.RawToken);
+            await StageEmailAsync(
+                approver.Email,
+                rendered.Subject,
+                rendered.HtmlBody,
+                rendered.TextBody,
+                "skeletal-staff-pending-approval",
+                $"skeletal-staff-pending-approval:{requestId:N}:{approvalStage}:{DestinationKey(approver.Email)}",
+                ct);
 
-        var target = await db.EmploymentRecords.AsNoTracking()
-            .Where(record => record.EmployeeId == employeeId && record.IsCurrent)
-            .OrderByDescending(record => record.EffectiveFrom)
-            .Select(record => new { record.InstituteId, record.DivisionId, record.SectionId })
-            .FirstOrDefaultAsync(ct);
-        if (target is null || target.InstituteId != instituteId)
-            return [];
-
-        var candidates = await (
-            from user in db.Users.AsNoTracking()
-            join userRole in db.UserRoles.AsNoTracking() on user.Id equals userRole.UserId
-            join role in db.Roles.AsNoTracking() on userRole.RoleId equals role.Id
-            join employment in db.EmploymentRecords.AsNoTracking() on user.EmployeeId equals employment.EmployeeId
-            where user.Email != null &&
-                  user.EmployeeId != null &&
-                  user.EmployeeId != employeeId &&
-                  role.Name == roleName &&
-                  employment.IsCurrent &&
-                  employment.InstituteId == instituteId
-            select new
+            if (!string.IsNullOrWhiteSpace(approver.Phone))
             {
-                user.Id,
-                Email = user.Email!,
-                user.DisplayName,
-                employment.DivisionId,
-                employment.SectionId
+                var portalLink = $"{renderer.StaffPortalUrl.TrimEnd('/')}/approvals/skeletal-staff";
+                await StageAsync(new CommunicationOutboxMessage(
+                    "sms", approver.Phone, null,
+                    $"{staffName} submitted a skeletal staff request for your approval. Sign in on the staff portal: {portalLink}",
+                    false, "skeletal-staff-pending-approval",
+                    $"skeletal-staff-pending-approval-sms:{requestId:N}:{approvalStage}:{DestinationKey(approver.Phone)}"), ct);
+            }
+        }
+    }
+
+    public async Task StageSkeletalStaffDecisionAsync(
+        Guid requestId,
+        Guid instituteId,
+        Guid employeeId,
+        string decision,
+        string? reason,
+        CancellationToken ct = default)
+    {
+        var owner = await FindEmployeeUserAsync(employeeId, ct);
+        if (owner is null)
+            return;
+
+        var request = db.SkeletalStaffRequests.Local.FirstOrDefault(candidate => candidate.Id == requestId)
+            ?? await db.SkeletalStaffRequests.AsNoTracking().SingleAsync(candidate => candidate.Id == requestId, ct);
+        var selectedDates = System.Text.Json.JsonSerializer.Deserialize<List<DateTime>>(request.SelectedDatesJson)?
+            .Select(date => date.Date).OrderBy(date => date).ToList() ?? [];
+        db.Notifications.Add(new Notification(
+            owner.UserId,
+            decision == "approved" ? "Skeletal staff request approved" : "Skeletal staff request rejected",
+            $"Your skeletal staff request was {decision}.",
+            $"/skeletal-staff/{requestId:D}"));
+
+        var recipient = owner.Email ?? await EmployeeEmailAsync(employeeId, ct);
+        if (recipient is null)
+            return;
+
+        var rendered = renderer.SkeletalStaffDecision(
+            owner.DisplayName,
+            decision,
+            selectedDates,
+            reason,
+            requestId);
+        await StageEmailAsync(
+            recipient,
+            rendered.Subject,
+            rendered.HtmlBody,
+            rendered.TextBody,
+            $"skeletal-staff-{decision}",
+            $"skeletal-staff-{decision}:{requestId:N}:{DestinationKey(recipient)}",
+            ct);
+    }
+
+    public async Task StageSkeletalStaffServiceReportAsync(
+        SkeletalStaffServiceReportNotification notification,
+        CancellationToken ct = default)
+    {
+        db.Notifications.Add(new Notification(
+            notification.RecipientUserId,
+            "Skeletal staff service report",
+            $"{notification.StaffDisplayName} completed skeletal staff service for {notification.PeriodName}.",
+            $"/skeletal-staff/{notification.RequestId:D}"));
+
+        var rendered = renderer.SkeletalStaffServiceReport(
+            notification.RecipientDisplayName,
+            notification.StaffDisplayName,
+            notification.PeriodName,
+            notification.RequestId);
+        var attachmentsJson = notification.AttachPdf
+            ? System.Text.Json.JsonSerializer.Serialize(new[]
+            {
+                new EmailAttachment(
+                    "skeletal-staff-service-report.pdf",
+                    "application/pdf",
+                    Convert.ToBase64String(notification.PdfContent))
             })
-            .ToListAsync(ct);
+            : null;
+        await StageEmailAsync(
+            notification.RecipientEmail,
+            rendered.Subject,
+            rendered.HtmlBody,
+            rendered.TextBody,
+            "skeletal-staff-service-report",
+            $"skeletal-staff-service-report:{notification.RequestId:N}:{DestinationKey(notification.RecipientEmail)}",
+            ct,
+            attachmentsJson);
 
-        IEnumerable<(Guid UserId, string Email, string DisplayName)> matched = approvalStage switch
+        if (!string.IsNullOrWhiteSpace(notification.RecipientPhone))
         {
-            LeaveApprovalStages.SectionHead when target.SectionId is Guid sectionId =>
-                candidates.Where(candidate => candidate.SectionId == sectionId)
-                    .Select(candidate => (candidate.Id, candidate.Email, candidate.DisplayName)),
-            LeaveApprovalStages.HeadOfDivision when target.DivisionId is Guid divisionId =>
-                candidates.Where(candidate => candidate.DivisionId == divisionId)
-                    .Select(candidate => (candidate.Id, candidate.Email, candidate.DisplayName)),
-            LeaveApprovalStages.InstituteDirector =>
-                candidates.Select(candidate => (candidate.Id, candidate.Email, candidate.DisplayName)),
-            _ => []
-        };
-
-        return matched
-            .GroupBy(candidate => candidate.Email, StringComparer.OrdinalIgnoreCase)
-            .Select(group => group.First())
-            .ToList();
+            var portalLink = $"{renderer.StaffPortalUrl.TrimEnd('/')}/skeletal-staff/{notification.RequestId:D}";
+            await StageAsync(new CommunicationOutboxMessage(
+                "sms", notification.RecipientPhone, null,
+                $"{notification.StaffDisplayName} completed skeletal staff service for {notification.PeriodName}. Review: {portalLink}",
+                false, "skeletal-staff-service-report",
+                $"skeletal-staff-service-report-sms:{notification.RequestId:N}:{DestinationKey(notification.RecipientPhone)}"), ct);
+        }
     }
 
     private async Task<EmployeeUser?> FindEmployeeUserAsync(

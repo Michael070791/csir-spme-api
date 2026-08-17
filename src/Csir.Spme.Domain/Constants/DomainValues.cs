@@ -222,6 +222,21 @@ public static class LeaveApprovalStages
     public static readonly string[] DefaultChain = [SectionHead, HeadOfDivision, InstituteDirector];
 }
 
+public static class SkeletalStaffApprovalStages
+{
+    /// <summary>Skeletal staff uses a four-stage chain including Head of Admin.</summary>
+    public static readonly string[] DefaultChain =
+        [LeaveApprovalStages.SectionHead, LeaveApprovalStages.HeadOfDivision, LeaveApprovalStages.AdminDirector, LeaveApprovalStages.InstituteDirector];
+}
+
+public static class WorkflowApprovalPurposes
+{
+    public const string Leave = "leave";
+    public const string SkeletalStaff = "skeletal-staff";
+
+    public static readonly string[] All = [Leave, SkeletalStaff];
+}
+
 public static class ApprovalDecisions
 {
     public const string Pending = "pending";

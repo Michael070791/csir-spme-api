@@ -69,12 +69,15 @@ public sealed class BrandedEmailRenderer
         DateTime startDate,
         DateTime endDate,
         decimal workingDays,
-        Guid leaveRequestId)
+        Guid leaveRequestId,
+        string? approvalToken = null)
     {
         var stageLabel = approvalStage.Replace('-', ' ');
         var detail =
             $"{staffDisplayName} submitted a {leaveType} leave request for {startDate:dd MMM yyyy} to {endDate:dd MMM yyyy} ({workingDays:0.##} working days). It is waiting for {stageLabel} review.";
-        var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/leave/{leaveRequestId:D}";
+        var link = string.IsNullOrWhiteSpace(approvalToken)
+            ? $"{_portals.StaffPortalUrl.TrimEnd('/')}/leave/{leaveRequestId:D}"
+            : $"{_portals.StaffPortalUrl.TrimEnd('/')}/approvals/leave?token={Uri.EscapeDataString(approvalToken)}";
         return Render(
             "Leave request awaiting your approval",
             approverDisplayName,
@@ -82,7 +85,73 @@ public sealed class BrandedEmailRenderer
             detail,
             "Review leave request",
             link,
-            "Sign in to the CSIR staff portal to approve or return this request. This message does not grant access by itself.");
+            "Sign in to the CSIR staff portal to approve or return this request. The secure email link expires in 48 hours.");
+    }
+
+    public RenderedEmail SkeletalStaffAwaitingApproval(
+        string approverDisplayName,
+        string staffDisplayName,
+        string approvalStage,
+        IReadOnlyList<DateTime> selectedDates,
+        Guid requestId,
+        string approvalToken)
+    {
+        var stageLabel = approvalStage.Replace('-', ' ');
+        var dateSummary = selectedDates.Count == 0
+            ? "selected dates"
+            : $"{selectedDates.Min():dd MMM yyyy} to {selectedDates.Max():dd MMM yyyy} ({selectedDates.Count} day(s))";
+        var detail =
+            $"{staffDisplayName} submitted a skeletal staff availability request for {dateSummary}. It is waiting for {stageLabel} review.";
+        var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/approvals/skeletal-staff?token={Uri.EscapeDataString(approvalToken)}";
+        return Render(
+            "Skeletal staff request awaiting your approval",
+            approverDisplayName,
+            "Skeletal staff request awaiting approval",
+            detail,
+            "Review skeletal staff request",
+            link,
+            "Sign in to the CSIR staff portal to approve or reject this request. The secure email link expires in 48 hours.");
+    }
+
+    public RenderedEmail SkeletalStaffDecision(
+        string displayName,
+        string decision,
+        IReadOnlyList<DateTime> selectedDates,
+        string? rejectionReason,
+        Guid requestId)
+    {
+        var dateSummary = selectedDates.Count == 0
+            ? "your selected dates"
+            : $"{selectedDates.Min():dd MMM yyyy} to {selectedDates.Max():dd MMM yyyy}";
+        var detail = $"Your skeletal staff availability request for {dateSummary} has been {decision}.";
+        if (decision == "rejected" && !string.IsNullOrWhiteSpace(rejectionReason))
+            detail += $" Reason: {rejectionReason.Trim()}";
+        var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/skeletal-staff/{requestId:D}";
+        return Render(
+            $"Skeletal staff request {decision}",
+            displayName,
+            $"Skeletal staff request {decision}",
+            detail,
+            "View skeletal staff request",
+            link,
+            "Sign in to the CSIR staff portal to review the request details.");
+    }
+
+    public RenderedEmail SkeletalStaffServiceReport(
+        string recipientDisplayName,
+        string staffDisplayName,
+        string periodName,
+        Guid requestId)
+    {
+        var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/skeletal-staff/{requestId:D}";
+        return Render(
+            "Skeletal staff service report",
+            recipientDisplayName,
+            "Skeletal staff service report",
+            $"{staffDisplayName} completed skeletal staff service for {periodName}. The attached report is available for your records.",
+            "Open skeletal staff request",
+            link,
+            "Sign in to the CSIR staff portal to review the request and attached report.");
     }
 
     public RenderedEmail StaffQuarterlyReportReviewed(

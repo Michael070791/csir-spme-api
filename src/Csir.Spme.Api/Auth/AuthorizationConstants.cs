@@ -11,6 +11,7 @@ public static class SpmeRoles
     public const string ServiceClient = "ServiceClient";
     public const string HeadOfSection = "HeadOfSection";
     public const string HeadOfDivision = "HeadOfDivision";
+    public const string HeadOfAdmin = "HeadOfAdmin";
     public const string InstituteDirector = "InstituteDirector";
 
     public static readonly string[] All =
@@ -24,6 +25,7 @@ public static class SpmeRoles
         ServiceClient,
         HeadOfSection,
         HeadOfDivision,
+        HeadOfAdmin,
         InstituteDirector
     ];
 }

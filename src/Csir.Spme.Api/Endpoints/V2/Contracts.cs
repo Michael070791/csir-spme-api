@@ -837,6 +837,25 @@ public sealed record UpdateSkeletalStaffRequest(
 public sealed record SkeletalStaffDecisionRequest(
     [property: StringLength(2000)] string? Comments);
 
+public sealed record WorkflowApprovalPreviewRequest(
+    [property: Required, StringLength(512, MinimumLength = 16)] string Token);
+
+public sealed record WorkflowApprovalPreviewResponse(
+    string Purpose,
+    Guid ResourceId,
+    string Stage,
+    string Title,
+    string Summary,
+    string ActionPath,
+    string? Etag);
+
+public sealed record WorkflowApprovalDecideRequest(
+    [property: Required, StringLength(512, MinimumLength = 16)] string Token,
+    [property: Required, StringLength(16)] string Decision,
+    [property: StringLength(2000)] string? Reason,
+    [property: StringLength(2000)] string? Comments,
+    string? Etag);
+
 public sealed record RejectSkeletalStaffRequest(
     [property: Required, StringLength(2000, MinimumLength = 1)] string Reason,
     [property: StringLength(2000)] string? Comments);

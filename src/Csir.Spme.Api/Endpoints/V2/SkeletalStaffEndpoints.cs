@@ -6,6 +6,7 @@ using Csir.Spme.Application.Common.Interfaces;
 using Csir.Spme.Domain.Common;
 using Csir.Spme.Domain.Constants;
 using Csir.Spme.Domain.Leave;
+using Csir.Spme.Infrastructure.Communications;
 using Csir.Spme.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 
@@ -78,6 +79,18 @@ internal static class SkeletalStaffEndpoints
             .WithSummary("Generate the completed-service allowance eligibility report.")
             .WithDescription("Generates a scoped report only after skeletal staff service is completed, including employee, institute, holiday period, approval, and leave-credit status. It records leave-credit eligibility only because no monetary allowance type or rate is configured.")
             .Produces<SkeletalStaffAllowanceReportResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status409Conflict);
+        requests.MapGet("/pending-approvals", ListPendingApprovalsAsync).RequireAuthorization(AuthorizationPolicies.ApproveLeave).WithName("SkeletalStaffRequests_ListPendingApprovals")
+            .WithSummary("List skeletal staff requests awaiting the caller's approval stage.")
+            .Produces<CollectionResponse<SkeletalStaffRequestResponse>>(StatusCodes.Status200OK);
+        requests.MapPost("/{id:guid}/resend-approval", ResendApprovalAsync).RequireAuthorization(AuthorizationPolicies.ApproveLeave).WithName("SkeletalStaffRequests_ResendApproval")
+            .WithSummary("Resend the current stage approval notifications and rotate email tokens.")
+            .Produces(StatusCodes.Status204NoContent).ProducesProblem(StatusCodes.Status404NotFound);
+        requests.MapGet("/{id:guid}/service-report", GetServiceReportAsync).RequireAuthorization(AuthorizationPolicies.ReadLeave).WithName("SkeletalStaffRequests_GetServiceReport")
+            .WithSummary("Download the branded skeletal staff service report PDF.")
+            .Produces(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status409Conflict);
+        requests.MapPost("/{id:guid}/send-service-report", SendServiceReportAsync).RequireAuthorization(AuthorizationPolicies.RequestLeave).WithName("SkeletalStaffRequests_SendServiceReport")
+            .WithSummary("Send the skeletal staff service report to Head of Admin.")
+            .Produces(StatusCodes.Status204NoContent).ProducesProblem(StatusCodes.Status409Conflict);
     }
 
     private static async Task<IResult> ListAsync(HttpContext context, SpmeDbContext db, Guid? employeeId, Guid? holidayPeriodId, string? status, int page = 1, int pageSize = 20, CancellationToken ct = default)
@@ -188,31 +201,72 @@ internal static class SkeletalStaffEndpoints
         return TypedResults.NoContent();
     }
 
-    private static async Task<IResult> SubmitAsync(Guid id, HttpContext context, SpmeDbContext db, IAuditService audit, CancellationToken ct)
+    private static async Task<IResult> SubmitAsync(
+        Guid id,
+        HttpContext context,
+        SpmeDbContext db,
+        IAuditService audit,
+        IWorkflowNotificationOutbox notifications,
+        IWorkflowApproverResolver approverResolver,
+        CancellationToken ct)
     {
         var item = await FindOwnedAsync(id, context, db, ct);
         if (item.IsFailure) return EndpointProblems.FromError(item.Error!);
         if (!CanManageOwnRequest(context, item.Value!)) return EndpointProblems.FromError(Error.Forbidden("You are not authorized to submit this skeletal staff request."));
         if (!HolidayPeriodEndpoints.TryApplyEtag(context, db, item.Value!, out var problem)) return problem!;
 
-        var submitted = item.Value!.Submit(LeaveApprovalStages.DefaultChain[0], DateTimeOffset.UtcNow);
+        var chain = await approverResolver.BuildSkeletalStaffChainAsync(item.Value!.InstituteId, item.Value.EmployeeId, ct);
+        if (chain.Count == 0)
+            return EndpointProblems.FromError(Error.Validation("A current employment record is required before submitting skeletal staff availability."));
+        foreach (var stage in chain)
+        {
+            var approvers = await approverResolver.FindStageApproversAsync(
+                item.Value.InstituteId, item.Value.EmployeeId, stage, ct);
+            if (approvers.Count == 0)
+            {
+                return EndpointProblems.FromError(stage switch
+                {
+                    LeaveApprovalStages.HeadOfDivision => Error.Validation("Head of Division must be assigned before skeletal staff requests can be submitted."),
+                    LeaveApprovalStages.AdminDirector => Error.Validation("Head of Admin must be assigned before skeletal staff requests can be submitted."),
+                    _ => Error.Validation("A required approver must be assigned before skeletal staff requests can be submitted.")
+                });
+            }
+        }
+
+        var submitted = item.Value.Submit(chain[0], DateTimeOffset.UtcNow);
         if (submitted.IsFailure) return EndpointProblems.FromError(submitted.Error!);
         await audit.RecordAsync("skeletal-staff-request.submitted", "SkeletalStaffRequest", id.ToString(), "status=draft", $"status={item.Value.Status}", ct);
+        await notifications.StageSkeletalStaffAwaitingApprovalAsync(
+            item.Value.Id,
+            item.Value.InstituteId,
+            item.Value.EmployeeId,
+            chain[0],
+            ParseDates(item.Value.SelectedDatesJson),
+            ct);
         await db.SaveChangesAsync(ct);
         context.Response.Headers.ETag = ConcurrencyToken.Format(item.Value.RowVersion);
         return TypedResults.Ok(Map(item.Value, EmptyApprovals));
     }
 
-    private static async Task<IResult> ApproveAsync(Guid id, SkeletalStaffDecisionRequest request, HttpContext context, SpmeDbContext db, IAuditService audit, CancellationToken ct)
+    private static async Task<IResult> ApproveAsync(
+        Guid id,
+        SkeletalStaffDecisionRequest request,
+        HttpContext context,
+        SpmeDbContext db,
+        IAuditService audit,
+        IWorkflowNotificationOutbox notifications,
+        IWorkflowApproverResolver approverResolver,
+        CancellationToken ct)
     {
         var item = await FindForStageDecisionAsync(id, context, db, ct);
         if (item.IsFailure) return EndpointProblems.FromError(item.Error!);
         if (!HolidayPeriodEndpoints.TryApplyEtag(context, db, item.Value!, out var problem)) return problem!;
 
-        var stageIndex = Array.IndexOf(LeaveApprovalStages.DefaultChain, item.Value!.CurrentApprovalStage);
+        var chain = await approverResolver.BuildSkeletalStaffChainAsync(item.Value!.InstituteId, item.Value.EmployeeId, ct);
+        var stageIndex = Array.IndexOf(chain.ToArray(), item.Value.CurrentApprovalStage);
         if (stageIndex < 0) return EndpointProblems.FromError(Error.StateTransition("The skeletal staff request is not awaiting an approval decision."));
-        var stage = LeaveApprovalStages.DefaultChain[stageIndex];
-        var nextStage = stageIndex + 1 < LeaveApprovalStages.DefaultChain.Length ? LeaveApprovalStages.DefaultChain[stageIndex + 1] : null;
+        var stage = chain[stageIndex];
+        var nextStage = stageIndex + 1 < chain.Count ? chain[stageIndex + 1] : null;
         var approved = item.Value.Approve(stage, nextStage);
         if (approved.IsFailure) return EndpointProblems.FromError(approved.Error!);
 
@@ -220,13 +274,27 @@ internal static class SkeletalStaffEndpoints
         var approverUserId = await PersistedUserIdAsync(context, db, ct);
         db.SkeletalStaffApprovals.Add(SkeletalStaffApproval.Create(id, approverUserId, stage, ApprovalDecisions.Approved, request.Comments, sequence));
         await audit.RecordAsync("skeletal-staff-request.approved", "SkeletalStaffRequest", id.ToString(), $"stage={stage}", $"status={item.Value.Status}", ct);
+        if (nextStage is not null)
+            await notifications.StageSkeletalStaffAwaitingApprovalAsync(
+                item.Value.Id, item.Value.InstituteId, item.Value.EmployeeId, nextStage,
+                ParseDates(item.Value.SelectedDatesJson), ct);
+        else
+            await notifications.StageSkeletalStaffDecisionAsync(
+                item.Value.Id, item.Value.InstituteId, item.Value.EmployeeId, "approved", null, ct);
         await db.SaveChangesAsync(ct);
         var approvals = await LoadApprovalsAsync(db, [id], ct);
         context.Response.Headers.ETag = ConcurrencyToken.Format(item.Value.RowVersion);
         return TypedResults.Ok(Map(item.Value, approvals));
     }
 
-    private static async Task<IResult> RejectAsync(Guid id, RejectSkeletalStaffRequest request, HttpContext context, SpmeDbContext db, IAuditService audit, CancellationToken ct)
+    private static async Task<IResult> RejectAsync(
+        Guid id,
+        RejectSkeletalStaffRequest request,
+        HttpContext context,
+        SpmeDbContext db,
+        IAuditService audit,
+        IWorkflowNotificationOutbox notifications,
+        CancellationToken ct)
     {
         var item = await FindForStageDecisionAsync(id, context, db, ct);
         if (item.IsFailure) return EndpointProblems.FromError(item.Error!);
@@ -239,6 +307,7 @@ internal static class SkeletalStaffEndpoints
         var approverUserId = await PersistedUserIdAsync(context, db, ct);
         db.SkeletalStaffApprovals.Add(SkeletalStaffApproval.Create(id, approverUserId, stage, ApprovalDecisions.Rejected, request.Comments ?? request.Reason, sequence));
         await audit.RecordAsync("skeletal-staff-request.rejected", "SkeletalStaffRequest", id.ToString(), $"stage={stage}", "status=rejected", ct);
+        await notifications.StageSkeletalStaffDecisionAsync(item.Value.Id, item.Value.InstituteId, item.Value.EmployeeId, "rejected", request.Reason, ct);
         await db.SaveChangesAsync(ct);
         var approvals = await LoadApprovalsAsync(db, [id], ct);
         context.Response.Headers.ETag = ConcurrencyToken.Format(item.Value.RowVersion);
@@ -328,6 +397,195 @@ internal static class SkeletalStaffEndpoints
             "not-configured"));
     }
 
+    private static async Task<IResult> ListPendingApprovalsAsync(
+        HttpContext context,
+        SpmeDbContext db,
+        IWorkflowApproverResolver approverResolver,
+        CancellationToken ct)
+    {
+        if (!context.User.IsInRole(SpmeRoles.HeadOfSection) &&
+            !context.User.IsInRole(SpmeRoles.HeadOfDivision) &&
+            !context.User.IsInRole(SpmeRoles.HeadOfAdmin) &&
+            !context.User.IsInRole(SpmeRoles.InstituteDirector) &&
+            !HolidayPeriodEndpoints.IsPlatform(context))
+            return EndpointProblems.FromError(Error.Forbidden("You are not authorized to review skeletal staff approvals."));
+
+        var instituteScope = HolidayPeriodEndpoints.InstituteId(context);
+        var query = db.SkeletalStaffRequests.AsNoTracking()
+            .Where(request => request.Status == SkeletalStaffRequestStatuses.Submitted ||
+                              request.Status == SkeletalStaffRequestStatuses.UnderReview);
+        if (!HolidayPeriodEndpoints.IsPlatform(context) && instituteScope.HasValue)
+            query = query.Where(request => request.InstituteId == instituteScope.Value);
+
+        var candidates = await query.OrderByDescending(request => request.SubmittedAt).ToListAsync(ct);
+        var pending = new List<SkeletalStaffRequest>();
+        foreach (var candidate in candidates)
+        {
+            if (await CanDecideCurrentStageAsync(context, candidate, db, ct))
+                pending.Add(candidate);
+        }
+
+        var approvals = await LoadApprovalsAsync(db, pending.Select(request => request.Id), ct);
+        return TypedResults.Ok(new CollectionResponse<SkeletalStaffRequestResponse>(
+            pending.Select(request => Map(request, approvals)).ToList(),
+            pending.Count));
+    }
+
+    private static async Task<IResult> ResendApprovalAsync(
+        Guid id,
+        HttpContext context,
+        SpmeDbContext db,
+        IWorkflowNotificationOutbox notifications,
+        IWorkflowApprovalTokenService tokenService,
+        CancellationToken ct)
+    {
+        var item = await db.SkeletalStaffRequests.FirstOrDefaultAsync(request => request.Id == id, ct);
+        if (item is null || !CanAccess(context, item))
+            return EndpointProblems.FromError(Error.NotFound("Skeletal staff request not found."));
+        if (string.IsNullOrWhiteSpace(item.CurrentApprovalStage))
+            return EndpointProblems.FromError(Error.StateTransition("The skeletal staff request is not awaiting approval."));
+
+        var canResend = HolidayPeriodEndpoints.IsPlatform(context) ||
+                        IsManager(context) ||
+                        await CanDecideCurrentStageAsync(context, item, db, ct);
+        if (!canResend)
+            return EndpointProblems.FromError(Error.NotFound("Skeletal staff request not found."));
+
+        await tokenService.RevokeUnusedAsync(
+            WorkflowApprovalPurposes.SkeletalStaff,
+            item.Id,
+            item.CurrentApprovalStage,
+            ct);
+        await notifications.StageSkeletalStaffAwaitingApprovalAsync(
+            item.Id,
+            item.InstituteId,
+            item.EmployeeId,
+            item.CurrentApprovalStage,
+            ParseDates(item.SelectedDatesJson),
+            ct);
+        await db.SaveChangesAsync(ct);
+        return TypedResults.NoContent();
+    }
+
+    private static async Task<IResult> GetServiceReportAsync(Guid id, HttpContext context, SpmeDbContext db, CancellationToken ct)
+    {
+        var item = await db.SkeletalStaffRequests.AsNoTracking().FirstOrDefaultAsync(request => request.Id == id, ct);
+        if (item is null || !CanAccess(context, item))
+            return EndpointProblems.FromError(Error.NotFound("Skeletal staff request not found."));
+        var period = await db.HolidayPeriods.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == item.HolidayPeriodId, ct);
+        if (period is null || !IsPeriodEnded(period))
+            return EndpointProblems.FromError(Error.StateTransition("The service report is available only after the holiday period ends."));
+        if (item.Status is not (SkeletalStaffRequestStatuses.Approved or SkeletalStaffRequestStatuses.Completed))
+            return EndpointProblems.FromError(Error.StateTransition("The service report is available only for approved skeletal staff requests."));
+
+        var pdf = await BuildServiceReportPdfAsync(db, item, period, ct);
+        return Results.File(pdf, "application/pdf", $"skeletal-staff-service-report-{item.Id:N}.pdf");
+    }
+
+    private static async Task<IResult> SendServiceReportAsync(
+        Guid id,
+        HttpContext context,
+        SpmeDbContext db,
+        IWorkflowNotificationOutbox notifications,
+        IWorkflowApproverResolver approverResolver,
+        CancellationToken ct)
+    {
+        var item = await db.SkeletalStaffRequests.AsNoTracking().FirstOrDefaultAsync(request => request.Id == id, ct);
+        if (item is null || !CanManageOwnRequest(context, item))
+            return EndpointProblems.FromError(Error.NotFound("Skeletal staff request not found."));
+        var period = await db.HolidayPeriods.AsNoTracking().FirstOrDefaultAsync(candidate => candidate.Id == item.HolidayPeriodId, ct);
+        if (period is null || !IsPeriodEnded(period))
+            return EndpointProblems.FromError(Error.StateTransition("The service report can be sent only after the holiday period ends."));
+        if (item.Status is not (SkeletalStaffRequestStatuses.Approved or SkeletalStaffRequestStatuses.Completed))
+            return EndpointProblems.FromError(Error.StateTransition("The service report can be sent only for approved skeletal staff requests."));
+
+        var recipients = await approverResolver.FindStageApproversAsync(
+            item.InstituteId, item.EmployeeId, LeaveApprovalStages.AdminDirector, ct);
+        var recipient = recipients.FirstOrDefault();
+        if (recipient is null)
+            return EndpointProblems.FromError(Error.Validation("Head of Admin must be assigned before the service report can be sent."));
+
+        var employeeName = await db.Employees.AsNoTracking()
+            .Where(employee => employee.Id == item.EmployeeId)
+            .Select(employee => new { employee.PreferredName, employee.OtherNames, employee.Surname })
+            .FirstOrDefaultAsync(ct);
+        var staffDisplayName = employeeName?.PreferredName ??
+            string.Join(' ', new[] { employeeName?.OtherNames, employeeName?.Surname }.Where(value => !string.IsNullOrWhiteSpace(value)));
+        var approvals = await LoadApprovalsAsync(db, [id], ct);
+        var pdf = await BuildServiceReportPdfAsync(db, item, period, ct);
+        await notifications.StageSkeletalStaffServiceReportAsync(new SkeletalStaffServiceReportNotification(
+            item.Id,
+            item.InstituteId,
+            item.EmployeeId,
+            recipient.UserId,
+            recipient.DisplayName,
+            recipient.Email,
+            recipient.Phone,
+            staffDisplayName,
+            $"{period.LeaveYear} holiday period",
+            period.AvailabilityStartDate,
+            period.AvailabilityEndDate,
+            ParseDates(item.SelectedDatesJson),
+            approvals.GetValueOrDefault(id, []).Select(approval =>
+                new SkeletalStaffApprovalTrailEntry(
+                    approval.ApprovalStage,
+                    approval.Decision,
+                    approval.DecidedAt,
+                    approval.Comments)).ToList(),
+            item.LeaveCreditedAt.HasValue ? "credited" : "pending-credit",
+            pdf,
+            true), ct);
+        await db.SaveChangesAsync(ct);
+        return TypedResults.NoContent();
+    }
+
+    private static async Task<byte[]> BuildServiceReportPdfAsync(
+        SpmeDbContext db,
+        SkeletalStaffRequest item,
+        HolidayPeriod period,
+        CancellationToken ct)
+    {
+        var employee = await db.Employees.AsNoTracking()
+            .Where(candidate => candidate.Id == item.EmployeeId)
+            .Select(candidate => new { candidate.StaffId, candidate.Surname, candidate.OtherNames, candidate.PreferredName })
+            .FirstOrDefaultAsync(ct);
+        var institute = await db.Institutes.AsNoTracking()
+            .Where(candidate => candidate.Id == item.InstituteId)
+            .Select(candidate => new { candidate.Code, candidate.Name })
+            .FirstOrDefaultAsync(ct);
+        var employment = await db.EmploymentRecords.AsNoTracking()
+            .Where(record => record.EmployeeId == item.EmployeeId && record.IsCurrent)
+            .Select(record => new { record.DivisionId, record.SectionId })
+            .FirstOrDefaultAsync(ct);
+        string? divisionName = null;
+        string? sectionName = null;
+        if (employment?.DivisionId is Guid divisionId)
+            divisionName = await db.Divisions.AsNoTracking().Where(division => division.Id == divisionId).Select(division => division.Name).FirstOrDefaultAsync(ct);
+        if (employment?.SectionId is Guid sectionId)
+            sectionName = await db.Sections.AsNoTracking().Where(section => section.Id == sectionId).Select(section => section.Name).FirstOrDefaultAsync(ct);
+        var approvals = await LoadApprovalsAsync(db, [item.Id], ct);
+        var lines = new List<string>
+        {
+            $"Staff: {employee?.PreferredName ?? $"{employee?.OtherNames} {employee?.Surname}".Trim()} ({employee?.StaffId})",
+            $"Institute: {institute?.Name} ({institute?.Code})",
+            $"Division: {divisionName ?? "Not assigned"}",
+            $"Section: {sectionName ?? "Not assigned"}",
+            $"Holiday period: {period.LeaveYear}",
+            $"Availability window: {period.AvailabilityStartDate:dd MMM yyyy} to {period.AvailabilityEndDate:dd MMM yyyy}",
+            $"Selected dates: {string.Join(", ", ParseDates(item.SelectedDatesJson).Select(date => date.ToString("dd MMM yyyy")))}",
+            $"Leave credit status: {(item.LeaveCreditedAt.HasValue ? "credited" : "pending-credit")}",
+            string.Empty,
+            "Approval trail"
+        };
+        foreach (var approval in approvals.GetValueOrDefault(item.Id, []))
+            lines.Add($"{approval.ApprovalStage}: {approval.Decision} on {approval.DecidedAt:dd MMM yyyy HH:mm}");
+        return SkeletalStaffServiceReportPdf.Build(new SkeletalStaffServiceReportPdf.SkeletalStaffServiceReportContent(lines));
+    }
+
+    private static bool IsPeriodEnded(HolidayPeriod period) =>
+        period.Status is HolidayPeriodStatuses.Closed or HolidayPeriodStatuses.Finalized ||
+        period.AvailabilityEndDate.Date < DateTime.UtcNow.Date;
+
     private static async Task<Result<SkeletalStaffRequest>> FindOwnedAsync(Guid id, HttpContext context, SpmeDbContext db, CancellationToken ct)
     {
         var item = await db.SkeletalStaffRequests.FirstOrDefaultAsync(x => x.Id == id, ct);
@@ -358,7 +616,7 @@ internal static class SkeletalStaffEndpoints
         return Result<SkeletalStaffRequest>.Success(item);
     }
 
-    private static async Task<bool> CanDecideCurrentStageAsync(
+    internal static async Task<bool> CanDecideCurrentStageAsync(
         HttpContext context,
         SkeletalStaffRequest item,
         SpmeDbContext db,
@@ -400,6 +658,9 @@ internal static class SkeletalStaffEndpoints
                 context.User.IsInRole(SpmeRoles.HeadOfDivision) &&
                 ownerScope.DivisionId.HasValue &&
                 ownerScope.DivisionId == approverScope.DivisionId,
+            LeaveApprovalStages.AdminDirector =>
+                context.User.IsInRole(SpmeRoles.HeadOfAdmin) &&
+                HolidayPeriodEndpoints.InstituteId(context) == item.InstituteId,
             _ => false
         };
     }
@@ -459,7 +720,7 @@ internal static class SkeletalStaffEndpoints
         IsManager(context)
             ? HolidayPeriodEndpoints.IsPlatform(context) || HolidayPeriodEndpoints.InstituteId(context) == item.InstituteId
             : EmployeeId(context) == item.EmployeeId;
-    private static bool CanAccessStageInstitute(HttpContext context, SkeletalStaffRequest item) =>
+    internal static bool CanAccessStageInstitute(HttpContext context, SkeletalStaffRequest item) =>
         HolidayPeriodEndpoints.IsPlatform(context) || HolidayPeriodEndpoints.InstituteId(context) == item.InstituteId;
     private static bool CanManageOwnRequest(HttpContext context, SkeletalStaffRequest item) => IsManager(context) || EmployeeId(context) == item.EmployeeId;
 

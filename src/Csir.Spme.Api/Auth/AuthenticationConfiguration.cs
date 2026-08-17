@@ -264,7 +264,7 @@ public static class AuthenticationConfiguration
             .AddPolicy(AuthorizationPolicies.ApproveLeave, policy =>
                 policy.RequireAssertion(ctx => HasPermissionOrRole(ctx, "leave.approve",
                     SpmeRoles.PlatformAdmin, SpmeRoles.HrAdmin, SpmeRoles.HeadOfSection,
-                    SpmeRoles.HeadOfDivision, SpmeRoles.InstituteDirector)))
+                    SpmeRoles.HeadOfDivision, SpmeRoles.HeadOfAdmin, SpmeRoles.InstituteDirector)))
             .AddPolicy(AuthorizationPolicies.ManageLeave, policy =>
                 policy.RequireAssertion(ctx =>
                     HasPermissionOrRole(ctx, "leave.manage", SpmeRoles.PlatformAdmin, SpmeRoles.HrAdmin) ||

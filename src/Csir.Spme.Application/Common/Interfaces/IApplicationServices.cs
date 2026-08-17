@@ -160,7 +160,51 @@ public interface IWorkflowNotificationOutbox
         Guid employeeId,
         Guid instituteId,
         CancellationToken ct = default);
+
+    Task StageSkeletalStaffAwaitingApprovalAsync(
+        Guid requestId,
+        Guid instituteId,
+        Guid employeeId,
+        string approvalStage,
+        IReadOnlyList<DateTime> selectedDates,
+        CancellationToken ct = default);
+
+    Task StageSkeletalStaffDecisionAsync(
+        Guid requestId,
+        Guid instituteId,
+        Guid employeeId,
+        string decision,
+        string? reason,
+        CancellationToken ct = default);
+
+    Task StageSkeletalStaffServiceReportAsync(
+        SkeletalStaffServiceReportNotification notification,
+        CancellationToken ct = default);
 }
+
+public sealed record SkeletalStaffApprovalTrailEntry(
+    string Stage,
+    string Decision,
+    DateTimeOffset DecidedAt,
+    string? Comments);
+
+public sealed record SkeletalStaffServiceReportNotification(
+    Guid RequestId,
+    Guid InstituteId,
+    Guid OwnerEmployeeId,
+    Guid RecipientUserId,
+    string RecipientDisplayName,
+    string RecipientEmail,
+    string? RecipientPhone,
+    string StaffDisplayName,
+    string PeriodName,
+    DateTime AvailabilityStart,
+    DateTime AvailabilityEnd,
+    IReadOnlyList<DateTime> SelectedDates,
+    IReadOnlyList<SkeletalStaffApprovalTrailEntry> Approvals,
+    string LeaveCreditStatus,
+    byte[] PdfContent,
+    bool AttachPdf);
 
 public sealed record StaffQuarterlyReportNotification(
     Guid ReportId,

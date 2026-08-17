@@ -92,6 +92,7 @@ public partial class SpmeDbContext : IdentityDbContext<User, Role, Guid>, IAppli
     public DbSet<CompassionateLeaveType> CompassionateLeaveTypes => Set<CompassionateLeaveType>();
     public DbSet<SkeletalStaffRequest> SkeletalStaffRequests => Set<SkeletalStaffRequest>();
     public DbSet<SkeletalStaffApproval> SkeletalStaffApprovals => Set<SkeletalStaffApproval>();
+    public DbSet<WorkflowApprovalToken> WorkflowApprovalTokens => Set<WorkflowApprovalToken>();
 
     // Plan
     public DbSet<StrategicPlan> StrategicPlans => Set<StrategicPlan>();

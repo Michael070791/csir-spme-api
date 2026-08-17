@@ -19,6 +19,7 @@ public static class V2EndpointRouteBuilderExtensions
         endpoints.MapHolidayEndpoints();
         endpoints.MapHolidayPeriodEndpoints();
         endpoints.MapSkeletalStaffEndpoints();
+        endpoints.MapWorkflowApprovalEndpoints();
         endpoints.MapKnowledgeEndpoints();
         endpoints.MapCommunicationEndpoints();
         endpoints.MapPromotionEndpoints();

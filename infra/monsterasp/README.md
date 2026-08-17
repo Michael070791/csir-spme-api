@@ -9,7 +9,7 @@ Treat this host as **staging only**. Free tier: 256 MB RAM, 1 GB SQL, no automat
 3. Enable **WebDeploy** under Websites → Manage → Deploy / FTP / WebDeploy / Git.
 4. Do **not** use MonsterASP **Enable Github deploy** for this API. That feature clones source into `/wwwroot`; IIS needs a published `dotnet publish` output deployed via WebDeploy from GitHub Actions.
 
-## Database migration (one-time)
+## Database migration
 
 Do **not** run `Database.Migrate()` on API startup.
 
@@ -19,8 +19,25 @@ Run all commands from the **`api/` repository root** (the folder that contains `
 cd /path/to/spme-v2/api
 ```
 
-1. Temporarily enable **remote SQL** on the MonsterASP database (Users and Remote).
-2. Choose **one** of the options below.
+### Automated (recommended on every deploy)
+
+GitHub Actions runs `Csir.Spme.Tools.DatabaseMigrator` **before** WebDeploy on every push to `main` (see `.github/workflows/deploy-monsterasp.yml`).
+
+**One-time setup:**
+
+1. In MonsterASP, enable **remote SQL** on the database (Users and Remote). GitHub-hosted runners reach the **public** host only while this is enabled.
+2. Copy the **public** connection string from the control panel (`dbXXXX.public.databaseasp.net`, with `Encrypt=True;TrustServerCertificate=True`).
+3. Add GitHub repository secret **`MONSTERASP_MIGRATION_CONNECTION_STRING`** with that value.
+
+The pipeline applies only **pending** EF migrations, then deploys the API, then smoke-tests `/health` and `/readyz`. If migration fails, deploy is skipped.
+
+Keep **`DatabaseMigration__Apply` unset** on the MonsterASP website. The API runtime connection string stays on the **internal** host (`dbXXXX.databaseasp.net`).
+
+Optional hardening: disable remote SQL when you are not deploying; re-enable it before a release (or leave it enabled if you accept the exposure for staging).
+
+### Manual (one-time or recovery)
+
+Use manual migration when CI is unavailable, for first-time schema on an empty database, or to recover from a failed deploy.
 
 **Important — two connection strings:**
 
@@ -58,15 +75,16 @@ export ConnectionStrings__DefaultConnection='Server=dbXXXX.public.databaseasp.ne
 export DatabaseProvider__UseSqlite=false
 export DatabaseMigration__Apply=true
 export DatabaseMigration__ConnectionTimeoutSeconds=120
-export PasswordReset__HashKey='your-32-byte-or-longer-secret'
 
 dotnet run --project tools/Csir.Spme.Tools.DatabaseMigrator/Csir.Spme.Tools.DatabaseMigrator.csproj
 ```
 
-Use the same `PasswordReset__HashKey` value you set in MonsterASP environment variables.
+The migrator ships `appsettings.json` with non-production defaults so manual runs do not need API secrets. Production deploys use GitHub Actions (see above) or the same command with your public connection string.
 
-3. Create and download a `.bak` backup after schema is applied.
-4. Disable remote SQL access again.
+After manual migration:
+
+1. Create and download a `.bak` backup.
+2. Disable remote SQL access again.
 
 ## Seeding business data (employees, institutes, leave, etc.)
 
@@ -186,7 +204,7 @@ To send mail and SMS on this host, also set every ZeptoMail and MNotify key from
 
 Imported employees still need a canonical `GradeId` before they can be assessed. Do not map job titles automatically.
 
-## GitHub Actions secrets (WebDeploy)
+## GitHub Actions secrets (WebDeploy + migrations)
 
 | Secret | Source |
 |--------|--------|
@@ -194,8 +212,9 @@ Imported employees still need a canonical `GradeId` before they can be assessed.
 | `SERVER_COMPUTER_NAME` | WebDeploy URL (`https://siteXXXX.siteasp.net:8172`) |
 | `SERVER_USERNAME` | WebDeploy username |
 | `SERVER_PASSWORD` | WebDeploy password |
+| `MONSTERASP_MIGRATION_CONNECTION_STRING` | Public MonsterASP SQL connection string (`dbXXXX.public.databaseasp.net`) while remote SQL is enabled; used only by the CI migrator step |
 
-Never commit `.publishsettings` or `.pubxml.user` files.
+Never commit `.publishsettings`, `.pubxml.user`, or migration connection strings to the repository.
 
 ## API documentation on staging
 
