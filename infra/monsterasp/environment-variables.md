@@ -135,6 +135,8 @@ Local User Secrets already have ZeptoMail enabled with verified sender `admin@cs
 
 If this stays `false`, activation/reset/OTP mail and SMS are written to the outbox and never sent.
 
+Production `appsettings.Production.json` now defaults this to `true`. The API also auto-enables the dispatcher in Production when ZeptoMail or MNotify is enabled. Still set the variable explicitly so a host-level override cannot silently disable sending.
+
 | Key | Value |
 |-----|-------|
 | `Messaging__DispatcherEnabled` | `true` |

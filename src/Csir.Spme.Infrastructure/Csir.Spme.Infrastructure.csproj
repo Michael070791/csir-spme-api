@@ -25,4 +25,7 @@
   <ItemGroup>
     <ProjectReference Include="..\Csir.Spme.Application\Csir.Spme.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Csir.Spme.Api.IntegrationTests" />
+  </ItemGroup>
 </Project>

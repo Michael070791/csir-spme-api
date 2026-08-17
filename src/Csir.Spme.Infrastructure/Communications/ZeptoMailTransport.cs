@@ -3,6 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Csir.Spme.Application.Common.Interfaces;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace Csir.Spme.Infrastructure.Communications;
@@ -11,11 +13,21 @@ public sealed class ZeptoMailTransport : IEmailTransport
 {
     private readonly HttpClient _httpClient;
     private readonly ZeptoMailOptions _options;
+    private readonly ILogger<ZeptoMailTransport> _logger;
 
     public ZeptoMailTransport(HttpClient httpClient, IOptions<ZeptoMailOptions> options)
+        : this(httpClient, options, NullLogger<ZeptoMailTransport>.Instance)
+    {
+    }
+
+    public ZeptoMailTransport(
+        HttpClient httpClient,
+        IOptions<ZeptoMailOptions> options,
+        ILogger<ZeptoMailTransport> logger)
     {
         _httpClient = httpClient;
         _options = options.Value;
+        _logger = logger;
     }
 
     public Task<CommunicationTransportResult> SendAsync(
@@ -39,15 +51,24 @@ public sealed class ZeptoMailTransport : IEmailTransport
     {
         var sender = ResolveSender(category);
         var token = NormalizeSendMailToken(sender.Token);
+        var fromEmail = TrimConfiguredValue(sender.Email);
         var fromName = ResolveFromName(sender.Name);
         if (!_options.Enabled || string.IsNullOrWhiteSpace(token) ||
-            string.IsNullOrWhiteSpace(sender.Email))
+            string.IsNullOrWhiteSpace(fromEmail))
+        {
+            _logger.LogWarning(
+                "ZeptoMail is not ready for category {Category}. Enabled={Enabled} tokenConfigured={TokenConfigured} fromEmailConfigured={FromEmailConfigured}.",
+                category,
+                _options.Enabled,
+                !string.IsNullOrWhiteSpace(token),
+                !string.IsNullOrWhiteSpace(fromEmail));
             return Rejected("provider_disabled", null, false);
+        }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "/v1.1/email");
         request.Headers.TryAddWithoutValidation("Authorization", $"Zoho-enczapikey {token}");
         request.Content = JsonContent.Create(new ZeptoMailRequest(
-            new ZeptoAddress(sender.Email.Trim(), fromName),
+            new ZeptoAddress(fromEmail, fromName),
             [new ZeptoRecipient(new ZeptoAddress(to.Trim(), to.Trim()))],
             subject.Trim(),
             isHtml ? body : null,
@@ -69,9 +90,16 @@ public sealed class ZeptoMailTransport : IEmailTransport
                 (int)response.StatusCode,
                 false);
 
+        var errorCode = ClassifyError(response.StatusCode);
         var transient = response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests ||
             (int)response.StatusCode >= 500;
-        return Rejected(ClassifyError(response.StatusCode), (int)response.StatusCode, transient);
+        _logger.LogWarning(
+            "ZeptoMail rejected category {Category} with status {StatusCode} code {ErrorCode}: {ResponseBody}",
+            category,
+            (int)response.StatusCode,
+            errorCode,
+            Truncate(payload, 500));
+        return Rejected(errorCode, (int)response.StatusCode, transient);
     }
 
     private (string Token, string Email, string Name) ResolveSender(string category)
@@ -92,10 +120,34 @@ public sealed class ZeptoMailTransport : IEmailTransport
     internal static string NormalizeSendMailToken(string? token)
     {
         const string prefix = "Zoho-enczapikey";
-        var normalized = token?.Trim() ?? string.Empty;
+        var normalized = TrimConfiguredValue(token);
         while (normalized.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
-            normalized = normalized[prefix.Length..].Trim();
+            normalized = TrimConfiguredValue(normalized[prefix.Length..]);
         return normalized;
+    }
+
+    internal static string TrimConfiguredValue(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var normalized = value.Trim().Trim('\uFEFF');
+        while (normalized.Length >= 2 &&
+               ((normalized[0] == '"' && normalized[^1] == '"') ||
+                (normalized[0] == '\'' && normalized[^1] == '\'')))
+            normalized = normalized[1..^1].Trim();
+
+        return normalized.Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal)
+            .Trim();
+    }
+
+    private static string Truncate(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+        var flattened = value.ReplaceLineEndings(" ").Trim();
+        return flattened.Length <= maxLength ? flattened : flattened[..maxLength];
     }
 
     private string ResolveFromName(string? name)

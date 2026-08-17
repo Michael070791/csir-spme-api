@@ -216,6 +216,9 @@ public sealed class CommunicationTransportTests
     [InlineData("auth-token")]
     [InlineData("Zoho-enczapikey auth-token")]
     [InlineData("Zoho-enczapikey  Zoho-enczapikey auth-token")]
+    [InlineData("\"auth-token\"")]
+    [InlineData("'Zoho-enczapikey auth-token'")]
+    [InlineData("\"Zoho-enczapikey auth-token\"\n")]
     public async Task ZeptoMail_Normalizes_Prefixed_Send_Mail_Tokens(string storedToken)
     {
         HttpRequestMessage? captured = null;

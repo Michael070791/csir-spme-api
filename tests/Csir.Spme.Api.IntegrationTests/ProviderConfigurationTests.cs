@@ -3,6 +3,8 @@ using Csir.Spme.Infrastructure.Communications;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -42,7 +44,44 @@ public sealed class ProviderConfigurationTests
             .WithMessage("*MNotify API key*");
     }
 
-    private static ServiceProvider CreateServices(IReadOnlyDictionary<string, string?> overrides)
+    [Fact]
+    public void Production_Enables_ZeptoMail_And_Dispatcher_When_Credentials_Are_Present()
+    {
+        using var services = CreateServices(new Dictionary<string, string?>
+        {
+            ["ZeptoMail:Enabled"] = "false",
+            ["ZeptoMail:SendMailToken"] = "\"Zoho-enczapikey real-token\"",
+            ["ZeptoMail:FromEmail"] = "\"admin@csir.test\"",
+            ["Messaging:DispatcherEnabled"] = "false"
+        }, Environments.Production);
+
+        var zepto = services.GetRequiredService<IOptions<ZeptoMailOptions>>().Value;
+        var messaging = services.GetRequiredService<IOptions<MessagingOptions>>().Value;
+
+        zepto.Enabled.Should().BeTrue();
+        zepto.SendMailToken.Should().Be("real-token");
+        zepto.FromEmail.Should().Be("admin@csir.test");
+        messaging.DispatcherEnabled.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Development_Does_Not_Auto_Enable_Dispatcher_Or_ZeptoMail()
+    {
+        using var services = CreateServices(new Dictionary<string, string?>
+        {
+            ["ZeptoMail:Enabled"] = "false",
+            ["ZeptoMail:SendMailToken"] = "real-token",
+            ["ZeptoMail:FromEmail"] = "admin@csir.test",
+            ["Messaging:DispatcherEnabled"] = "false"
+        }, Environments.Development);
+
+        services.GetRequiredService<IOptions<ZeptoMailOptions>>().Value.Enabled.Should().BeFalse();
+        services.GetRequiredService<IOptions<MessagingOptions>>().Value.DispatcherEnabled.Should().BeFalse();
+    }
+
+    private static ServiceProvider CreateServices(
+        IReadOnlyDictionary<string, string?> overrides,
+        string? environmentName = null)
     {
         var settings = new Dictionary<string, string?>
         {
@@ -61,7 +100,17 @@ public sealed class ProviderConfigurationTests
             .Build();
         var services = new ServiceCollection();
         services.AddLogging();
+        if (!string.IsNullOrWhiteSpace(environmentName))
+            services.AddSingleton<IHostEnvironment>(new StaticHostEnvironment(environmentName));
         services.AddInfrastructureServices(configuration);
         return services.BuildServiceProvider();
+    }
+
+    private sealed class StaticHostEnvironment(string environmentName) : IHostEnvironment
+    {
+        public string EnvironmentName { get; set; } = environmentName;
+        public string ApplicationName { get; set; } = "test";
+        public string ContentRootPath { get; set; } = AppContext.BaseDirectory;
+        public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
     }
 }

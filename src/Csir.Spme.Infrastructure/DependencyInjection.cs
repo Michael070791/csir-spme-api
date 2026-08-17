@@ -169,6 +169,13 @@ public static class DependencyInjection
                 options.MaximumAttempts is >= 1 and <= 20 && options.LeaseSeconds is >= 10 and <= 300,
                 "Messaging worker settings are outside the supported bounds.")
             .ValidateOnStart();
+        services.AddSingleton<CommunicationOptionsPostConfigure>();
+        services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<ZeptoMailOptions>>(
+            sp => sp.GetRequiredService<CommunicationOptionsPostConfigure>());
+        services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<MNotifyOptions>>(
+            sp => sp.GetRequiredService<CommunicationOptionsPostConfigure>());
+        services.AddSingleton<Microsoft.Extensions.Options.IPostConfigureOptions<MessagingOptions>>(
+            sp => sp.GetRequiredService<CommunicationOptionsPostConfigure>());
         services.AddOptions<PasswordResetOptions>()
             .Bind(configuration.GetSection(PasswordResetOptions.SectionName))
             .Validate(options => options.TokenLifespan == TimeSpan.FromHours(24),
@@ -203,6 +210,7 @@ public static class DependencyInjection
             client.BaseAddress = new Uri(options.BaseUrl.TrimEnd('/'));
             client.Timeout = TimeSpan.FromSeconds(options.RequestTimeoutSeconds);
         }).RemoveAllLoggers();
+        services.AddSingleton<CommunicationDispatchPulse>();
         services.AddScoped<ICommunicationOutbox, DurableCommunicationOutbox>();
         services.AddScoped<IWorkflowNotificationOutbox, WorkflowNotificationOutbox>();
         services.AddScoped<IWorkflowApprovalTokenService, WorkflowApprovalTokenService>();

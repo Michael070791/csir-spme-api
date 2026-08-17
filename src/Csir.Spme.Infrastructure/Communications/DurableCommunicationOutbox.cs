@@ -8,8 +8,13 @@ namespace Csir.Spme.Infrastructure.Communications;
 public sealed class DurableCommunicationOutbox : ICommunicationOutbox
 {
     private readonly SpmeDbContext _db;
+    private readonly CommunicationDispatchPulse _pulse;
 
-    public DurableCommunicationOutbox(SpmeDbContext db) => _db = db;
+    public DurableCommunicationOutbox(SpmeDbContext db, CommunicationDispatchPulse pulse)
+    {
+        _db = db;
+        _pulse = pulse;
+    }
 
     public Task EnqueueEmailAsync(
         string to,
@@ -51,6 +56,8 @@ public sealed class DurableCommunicationOutbox : ICommunicationOutbox
 
             await _db.SaveChangesAsync(ct);
         }
+
+        _pulse.Pulse();
     }
 }
 
