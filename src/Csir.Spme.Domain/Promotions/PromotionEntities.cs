@@ -107,6 +107,12 @@ public sealed class PromotionPath : BaseEntity
             EffectiveFrom = effectiveFrom
         };
     }
+
+    public void Retire(DateTime effectiveTo)
+    {
+        Status = PromotionConstants.PathInactive;
+        EffectiveTo = effectiveTo;
+    }
 }
 
 public sealed class PromotionGradeEquivalency : BaseEntity

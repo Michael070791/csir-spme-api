@@ -36,4 +36,6 @@ public class Grade : BaseEntity
             IsActive = true
         };
     }
+
+    public void Deactivate() => IsActive = false;
 }

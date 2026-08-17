@@ -3,13 +3,17 @@ namespace Csir.Spme.Domain.Promotions;
 public static class PromotionConstants
 {
     public const string SeniorStaff = "senior-staff";
+    public const string SeniorMember = "senior-member";
     public const string TechnicalStream = "technical";
     public const string AdministrativeStream = "administrative";
+    public const string ResearchStream = "research";
+    public const string ResearchArsRsNonPhdPath = "research-ars-rs-non-phd";
     public const short CurrentCycleYear = 2027;
     public const string CyclePlanned = "planned";
     public const string CycleOpen = "open";
     public const string CycleClosed = "closed";
     public const string PathActive = "active";
+    public const string PathInactive = "inactive";
     public const string PathRequiresPolicyConfirmation = "requires-policy-confirmation";
     public const string AssessmentNotAssessed = "not-assessed";
     public const string AssessmentAssessed = "assessed";

@@ -1,3 +1,4 @@
+using Csir.Spme.Domain.Constants;
 using Csir.Spme.Domain.Promotions;
 using FluentAssertions;
 using Xunit;
@@ -27,14 +28,17 @@ public sealed class PromotionEligibilityEvaluatorTests
     }
 
     [Fact]
-    public void Evaluate_Rejects_NonSeniorStaff_And_Blocks_Unresolved_Policy()
+    public void Evaluate_Rejects_Junior_Staff_And_Blocks_Unresolved_Policy()
     {
         var outsideScope = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
-            "senior-member", PromotionConstants.PathActive, new DateTime(2020, 1, 1), 4, new DateTime(2026, 1, 1), true, false, true, false));
+            StaffCategories.JuniorStaff, PromotionConstants.PathActive, new DateTime(2020, 1, 1), 4, new DateTime(2026, 1, 1), true, false, true, false));
+        var seniorMember = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
+            PromotionConstants.SeniorMember, PromotionConstants.PathActive, new DateTime(2020, 1, 1), 5, new DateTime(2026, 1, 1), true, false, true, false));
         var ambiguity = PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
             PromotionConstants.SeniorStaff, PromotionConstants.PathRequiresPolicyConfirmation, new DateTime(2020, 1, 1), 5, new DateTime(2026, 1, 1), true, false, true, false));
 
         outsideScope.EligibilityState.Should().Be(PromotionConstants.EligibilityNotApplicable);
+        seniorMember.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
         ambiguity.EligibilityState.Should().Be(PromotionConstants.EligibilityPolicyAmbiguity);
     }
 

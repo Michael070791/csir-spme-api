@@ -183,6 +183,8 @@ public sealed record PortalProfileResponse(
     string? PreferredName,
     string? JobTitle,
     string? StaffCategory,
+    string? GradeCode,
+    string? GradeName,
     PortalInstituteResponse? Institute,
     PortalContactStatusResponse Contact,
     string IdentityType,
@@ -291,7 +293,8 @@ public sealed record EmployeeInstituteSummary(Guid Id, string Code, string Name,
 
 public sealed record EmployeeCurrentEmploymentSummary(
     Guid? DivisionId, string? DivisionName, Guid? SectionId, string? SectionName, string? JobTitle,
-    IReadOnlyList<string> LeadershipRoles, string? StaffCategory, string? GradeStep, string? AreaOfSpecialization, string ServiceStatus, string? Organization, string? Location,
+    IReadOnlyList<string> LeadershipRoles, string? StaffCategory, Guid? GradeId, string? GradeCode, string? GradeName,
+    string? GradeStep, string? AreaOfSpecialization, string ServiceStatus, string? Organization, string? Location,
     string? Region, string? District, string? PensionType, string? PensionId, DateTime? AppointmentDate,
     DateTime? PromotionDate);
 
@@ -317,7 +320,8 @@ public sealed record EmployeeDetailResponse(
 
 public sealed record EmploymentRecordResponse(
     Guid Id, Guid? DivisionId, string? DivisionName, Guid? SectionId, string? SectionName, string? JobTitle,
-    IReadOnlyList<string> LeadershipRoles, string? StaffCategory, string? GradeStep, string? AreaOfSpecialization, string ServiceStatus, string? Organization, string? Location,
+    IReadOnlyList<string> LeadershipRoles, string? StaffCategory, Guid? GradeId, string? GradeCode, string? GradeName,
+    string? GradeStep, string? AreaOfSpecialization, string ServiceStatus, string? Organization, string? Location,
     string? Region, string? District, string? PensionType, string? PensionId, DateTime? AppointmentDate,
     DateTime? PromotionDate, DateTime EffectiveFrom, DateTime? EffectiveTo, bool IsCurrent);
 

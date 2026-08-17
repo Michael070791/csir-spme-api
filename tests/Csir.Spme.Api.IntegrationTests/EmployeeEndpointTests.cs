@@ -573,6 +573,129 @@ public class EmployeeEndpointTests : IClassFixture<SpmeApiFactory>
         updated.CurrentEmployment.AreaOfSpecialization.Should().Be("Applied biotechnology");
         updated.CurrentEmployment.Location.Should().Be("Accra");
         updated.CurrentEmployment.PromotionDate.Should().Be(new DateTime(2026, 1, 1));
+        updated.CurrentEmployment.GradeId.Should().BeNull();
+        updated.CurrentEmployment.GradeName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Employee_Employment_Syncs_Job_Title_From_Grade_Catalog()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var instituteId = await SeedInstituteAsync($"GRADE-{suffix[..8]}");
+        var gradeId = await SeedGradeAsync($"to-{suffix[..8]}", "Technical Officer", StaffCategories.SeniorStaff);
+        var staffId = $"GRADE-STF-{suffix}";
+
+        var createRequest = new UpsertEmployeeRequest(
+            InstituteId: instituteId,
+            StaffId: staffId,
+            Prefix: null,
+            Surname: "Mensah",
+            OtherNames: "Kofi",
+            Gender: "male",
+            DateOfBirth: null,
+            Nationality: null,
+            Religion: null,
+            MaritalStatus: null,
+            PrimaryEmail: $"{staffId.ToLowerInvariant()}@example.test",
+            Phone: null,
+            ProfileStatus: "active",
+            IsHrApproved: true,
+            DivisionId: null,
+            SectionId: null,
+            GradeId: gradeId,
+            JobTitle: "Senior Technologist",
+            LeadershipRoles: null,
+            StaffCategory: StaffCategories.SeniorStaff,
+            GradeStep: "1",
+            AreaOfSpecialization: null,
+            ServiceStatus: "active",
+            Organization: null,
+            Location: null,
+            Region: null,
+            District: null,
+            PensionType: null,
+            PensionId: null,
+            AppointmentDate: new DateTime(2021, 1, 1),
+            PromotionDate: null);
+
+        var createResponse = await _client.PostAsJsonAsync("/api/v2/employees", createRequest);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created, await createResponse.Content.ReadAsStringAsync());
+        var created = await createResponse.Content.ReadFromJsonAsync<EmployeeDetailResponse>();
+        created.Should().NotBeNull();
+        created!.CurrentEmployment.Should().NotBeNull();
+        created.CurrentEmployment!.JobTitle.Should().Be("Technical Officer");
+        created.CurrentEmployment.GradeStep.Should().Be("1");
+        created.CurrentEmployment.GradeId.Should().Be(gradeId);
+        created.CurrentEmployment.GradeCode.Should().Be($"to-{suffix[..8]}");
+        created.CurrentEmployment.GradeName.Should().Be("Technical Officer");
+        created.CurrentEmployment.StaffCategory.Should().Be(StaffCategories.SeniorStaff);
+
+        var list = await _client.GetFromJsonAsync<EmployeePageResponse>($"/api/v2/employees?search={staffId}&page=1&pageSize=5");
+        list.Should().NotBeNull();
+        var listed = list!.Items.Should().ContainSingle(item => item.StaffId == staffId).Subject;
+        listed.CurrentEmployment!.GradeId.Should().Be(gradeId);
+        listed.CurrentEmployment.GradeName.Should().Be("Technical Officer");
+        listed.CurrentEmployment.JobTitle.Should().Be("Technical Officer");
+        listed.CurrentEmployment.GradeStep.Should().Be("1");
+
+        var history = await _client.GetFromJsonAsync<CollectionResponse<EmploymentRecordResponse>>(
+            $"/api/v2/employees/{created.Id}/employment-records");
+        history.Should().NotBeNull();
+        history!.Items.Should().ContainSingle();
+        history.Items[0].GradeId.Should().Be(gradeId);
+        history.Items[0].GradeName.Should().Be("Technical Officer");
+        history.Items[0].JobTitle.Should().Be("Technical Officer");
+        history.Items[0].GradeStep.Should().Be("1");
+    }
+
+    [Fact]
+    public async Task Employee_Update_Rejects_Grade_That_Does_Not_Match_Staff_Category()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var instituteId = await SeedInstituteAsync($"GMIS-{suffix[..8]}");
+        var seniorMemberGradeId = await SeedGradeAsync($"sm-{suffix[..8]}", "Research Scientist", StaffCategories.SeniorMember);
+        var staffId = $"GMIS-STF-{suffix}";
+        var createRequest = new UpsertEmployeeRequest(
+            InstituteId: instituteId,
+            StaffId: staffId,
+            Prefix: null,
+            Surname: "Owusu",
+            OtherNames: "Ama",
+            Gender: "female",
+            DateOfBirth: null,
+            Nationality: null,
+            Religion: null,
+            MaritalStatus: null,
+            PrimaryEmail: $"{staffId.ToLowerInvariant()}@example.test",
+            Phone: null,
+            ProfileStatus: "active",
+            IsHrApproved: true,
+            DivisionId: null,
+            SectionId: null,
+            GradeId: null,
+            JobTitle: "Senior Technologist",
+            LeadershipRoles: null,
+            StaffCategory: StaffCategories.SeniorStaff,
+            GradeStep: "1",
+            AreaOfSpecialization: null,
+            ServiceStatus: "active",
+            Organization: null,
+            Location: null,
+            Region: null,
+            District: null,
+            PensionType: null,
+            PensionId: null,
+            AppointmentDate: new DateTime(2021, 1, 1),
+            PromotionDate: null);
+
+        var created = await (await _client.PostAsJsonAsync("/api/v2/employees", createRequest))
+            .Content.ReadFromJsonAsync<EmployeeDetailResponse>();
+        created.Should().NotBeNull();
+
+        var rejected = await _client.PatchAsJsonAsync(
+            $"/api/v2/employees/{created!.Id}",
+            createRequest with { GradeId = seniorMemberGradeId });
+        rejected.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity, await rejected.Content.ReadAsStringAsync());
     }
 
     private async Task<Guid> SeedEmployeeAsync()
@@ -627,6 +750,16 @@ public class EmployeeEndpointTests : IClassFixture<SpmeApiFactory>
         await db.SaveChangesAsync();
 
         return employee.Id;
+    }
+
+    private async Task<Guid> SeedGradeAsync(string code, string name, string staffCategory)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+        var grade = Grade.Create(code, name, staffCategory, "technical", 1, 10);
+        db.Grades.Add(grade);
+        await db.SaveChangesAsync();
+        return grade.Id;
     }
 
     private async Task<Guid> SeedInstituteAsync(string code)

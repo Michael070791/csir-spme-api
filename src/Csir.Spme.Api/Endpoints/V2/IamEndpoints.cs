@@ -127,7 +127,7 @@ internal static class IamEndpoints
         me.MapGet("/portal-profile", GetPortalProfileAsync)
             .WithName("Settings_GetMyPortalProfile")
             .WithSummary("Get the authenticated staff portal profile.")
-            .WithDescription("Returns the minimal self-service projection required by the staff portal. Staff identity, employment, institute, contact-confirmation state, and effective permissions are derived from the authenticated account and server-side Identity claims. It never accepts a user, employee, staff, or institute identifier and deliberately excludes phone numbers, dates of birth, addresses, and family data.")
+            .WithDescription("Returns the minimal self-service projection required by the staff portal. Staff identity, employment, institute, contact-confirmation state, and effective permissions are derived from the authenticated account and server-side Identity claims. Employment includes staff category and the Conditions of Service job title used for promotion checking. It never accepts a user, employee, staff, or institute identifier and deliberately excludes phone numbers, dates of birth, addresses, and family data.")
             .Produces<PortalProfileResponse>(StatusCodes.Status200OK);
         me.MapPatch("", UpdateMyProfileAsync)
             .WithName("Settings_UpdateMyProfile")
@@ -956,9 +956,22 @@ internal static class IamEndpoints
                     record.StaffCategory,
                     record.LeadershipRoles,
                     record.DivisionId,
-                    record.SectionId
+                    record.SectionId,
+                    record.GradeId
                 })
                 .FirstOrDefaultAsync(ct);
+
+        string? gradeCode = null;
+        string? gradeName = null;
+        if (employment?.GradeId is Guid assignedGradeId)
+        {
+            var grade = await db.Grades.AsNoTracking()
+                .Where(item => item.Id == assignedGradeId)
+                .Select(item => new { item.Code, item.Name })
+                .FirstOrDefaultAsync(ct);
+            gradeCode = grade?.Code;
+            gradeName = grade?.Name;
+        }
 
         string? divisionName = null;
         string? sectionName = null;
@@ -993,6 +1006,8 @@ internal static class IamEndpoints
             employee?.PreferredName,
             employment?.JobTitle,
             employment?.StaffCategory,
+            gradeCode,
+            gradeName,
             institute,
             new PortalContactStatusResponse(
                 user.Email,

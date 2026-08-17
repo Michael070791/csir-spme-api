@@ -101,6 +101,25 @@ public sealed class PortalProfileEndpointTests : IClassFixture<SpmeApiFactory>
     }
 
     [Fact]
+    public async Task Portal_Profile_Includes_Canonical_Present_Grade()
+    {
+        var employee = await CreateEmployeeUserAsync(
+            SpmeRoles.Employee,
+            [SpmePermissions.MemosRead],
+            gradeCode: $"to-{Guid.NewGuid():N}"[..12],
+            gradeName: "Technical Officer");
+
+        using var client = CreateClient(CreateToken(employee.UserId, employee.EmployeeId));
+        var response = await client.GetAsync("/api/v2/me/portal-profile");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        json.RootElement.GetProperty("staffCategory").GetString().Should().Be("senior-staff");
+        json.RootElement.GetProperty("gradeName").GetString().Should().Be("Technical Officer");
+        json.RootElement.GetProperty("gradeCode").GetString().Should().NotBeNullOrWhiteSpace();
+        json.RootElement.GetProperty("jobTitle").GetString().Should().Be("Research Officer");
+    }
+
+    [Fact]
     public async Task Portal_Profile_Requires_Authentication()
     {
         using var client = _factory.CreateClient();
@@ -130,7 +149,9 @@ public sealed class PortalProfileEndpointTests : IClassFixture<SpmeApiFactory>
         IReadOnlyList<string> rolePermissions,
         bool emailConfirmed = true,
         bool phoneConfirmed = true,
-        string? leadershipRoles = null)
+        string? leadershipRoles = null,
+        string? gradeCode = null,
+        string? gradeName = null)
     {
         await using var scope = _factory.Services.CreateAsyncScope();
         var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
@@ -143,9 +164,38 @@ public sealed class PortalProfileEndpointTests : IClassFixture<SpmeApiFactory>
             "single", $"employee.{suffix}@example.test", "0244991234", isHrApproved: true);
         db.Institutes.Add(institute);
         db.Employees.Add(employee);
-        db.EmploymentRecords.Add(new EmploymentRecord(employee.Id, institute.Id, null, null, null,
-            "Research Officer", leadershipRoles, "senior-staff", "active", null, null, null, null, null,
-            new DateTime(2020, 1, 1), isCurrent: true));
+
+        Guid? gradeId = null;
+        if (!string.IsNullOrWhiteSpace(gradeCode))
+        {
+            var grade = Grade.Create(gradeCode, gradeName ?? gradeCode, StaffCategories.SeniorStaff, "technical", 1, 10);
+            db.Grades.Add(grade);
+            gradeId = grade.Id;
+        }
+
+        db.EmploymentRecords.Add(new EmploymentRecord(
+            employee.Id,
+            institute.Id,
+            null,
+            null,
+            null,
+            gradeId,
+            "Research Officer",
+            leadershipRoles,
+            "senior-staff",
+            null,
+            null,
+            "active",
+            null,
+            null,
+            null,
+            null,
+            new DateTime(2020, 1, 1),
+            null,
+            null,
+            null,
+            new DateTime(2020, 1, 1),
+            isCurrent: true));
         await db.SaveChangesAsync();
 
         await EnsureRoleWithPermissionsAsync(roleManager, roleName, rolePermissions);

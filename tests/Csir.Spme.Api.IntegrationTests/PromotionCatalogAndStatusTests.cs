@@ -41,16 +41,41 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
         var cycle = await db.PromotionCycles.SingleAsync(item => item.CycleYear == PromotionConstants.CurrentCycleYear);
         cycle.Status.Should().Be(PromotionConstants.CycleOpen);
         cycle.EffectivePromotionDate.Should().Be(new DateTime(2027, 1, 1));
-        (await db.PromotionPaths.CountAsync()).Should().BeGreaterThanOrEqualTo(6);
+        (await db.PromotionPaths.CountAsync(item => item.Status != PromotionConstants.PathInactive)).Should().BeGreaterThanOrEqualTo(7);
         (await db.PromotionPaths.SingleAsync(item => item.Code == "cos-s22-administrative"))
             .Status.Should().Be(PromotionConstants.PathRequiresPolicyConfirmation);
+        (await db.Grades.SingleAsync(item => item.Code == "assistant-research-scientist")).StaffCategory.Should().Be(StaffCategories.SeniorMember);
+        (await db.PromotionPaths.AnyAsync(item => item.Code == PromotionConstants.ResearchArsRsNonPhdPath && item.Status == PromotionConstants.PathActive)).Should().BeTrue();
+        (await db.PromotionPaths.AnyAsync(item => item.Code.Contains("technologist") && item.Status == PromotionConstants.PathActive)).Should().BeFalse();
 
         using var hr = Client(SpmeRoles.HrAdmin, null, Guid.NewGuid());
         var cycles = await hr.GetFromJsonAsync<CollectionResponse<PromotionCycleResponse>>("/api/v2/promotion-cycles");
         cycles!.Items.Should().Contain(item => item.CycleYear == PromotionConstants.CurrentCycleYear && item.Status == PromotionConstants.CycleOpen);
         var paths = await hr.GetFromJsonAsync<CollectionResponse<PromotionPathResponse>>("/api/v2/promotion-paths");
         paths!.Items.Should().Contain(item => item.Code == "cos-s20-technical");
+        paths.Items.Should().Contain(item => item.Code == PromotionConstants.ResearchArsRsNonPhdPath);
+        paths.Items.Should().NotContain(item => item.Code.Contains("technologist"));
         paths.Items.Should().Contain(item => item.Code == "cos-s22-administrative" && item.Status == PromotionConstants.PathRequiresPolicyConfirmation);
+        var researchPath = paths.Items.Should().ContainSingle(item => item.Code == PromotionConstants.ResearchArsRsNonPhdPath).Subject;
+        researchPath.StaffCategory.Should().Be(PromotionConstants.SeniorMember);
+        researchPath.MinimumYearsInSourceGrade.Should().Be(5);
+        researchPath.RequiredQualificationLevel.Should().Be(QualificationLevels.MastersOrEquivalent);
+    }
+
+    [Fact]
+    public async Task Live_Status_Matches_Non_Phd_Path_For_Assistant_Research_Scientist()
+    {
+        var seed = await SeedLinkedEmployeeAsync(PromotionConstants.SeniorMember, "assistant-research-scientist", verifiedMasters: true);
+        using var owner = Client(SpmeRoles.Employee, seed.EmployeeId, seed.InstituteId);
+        var mine = await owner.GetFromJsonAsync<PromotionStatusResponse>("/api/v2/promotion-status/me");
+
+        mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
+        mine.NextPromotion!.PathCode.Should().Be(PromotionConstants.ResearchArsRsNonPhdPath);
+        mine.NextPromotion.MinimumYearsInSourceGrade.Should().Be(5);
+        mine.CurrentGrade!.Code.Should().Be("assistant-research-scientist");
+        mine.CurrentGrade.Name.Should().Be("Assistant Research Scientist");
+        mine.NextPromotion.TargetGrade.Name.Should().Be("Research Scientist");
+        mine.Criteria.Should().Contain(item => item.Code == "qualification" && item.Status == "satisfied");
     }
 
     [Fact]
@@ -71,7 +96,7 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
     [Fact]
     public async Task Live_Status_Explains_Senior_Member_Coming_Soon_And_Lookup_Accepts_The_Category()
     {
-        var seed = await SeedLinkedEmployeeAsync(StaffCategories.SeniorMember, null, verifiedDegree: false);
+        var seed = await SeedLinkedEmployeeAsync(StaffCategories.SeniorMember, "research-scientist", verifiedDegree: false);
         using var owner = Client(SpmeRoles.Employee, seed.EmployeeId, seed.InstituteId);
         var mine = await owner.GetFromJsonAsync<PromotionStatusResponse>("/api/v2/promotion-status/me");
         mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityNotApplicable);
@@ -105,7 +130,11 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
         invalid.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
     }
 
-    private async Task<LiveSeed> SeedLinkedEmployeeAsync(string staffCategory, string? gradeCode, bool verifiedDegree)
+    private async Task<LiveSeed> SeedLinkedEmployeeAsync(
+        string staffCategory,
+        string? gradeCode,
+        bool verifiedDegree = false,
+        bool verifiedMasters = false)
     {
         _ = _factory.CreateClient();
         await using var scope = _factory.Services.CreateAsyncScope();
@@ -116,19 +145,31 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
         var staffId = $"PC{suffix}";
         var employee = new Employee(institute.Id, staffId, "Tester", "female");
         Guid? gradeId = null;
+        string? jobTitle = "Officer";
         if (gradeCode is not null)
         {
             var grade = await db.Grades.SingleAsync(item => item.Code == gradeCode);
             gradeId = grade.Id;
+            jobTitle = grade.Name;
         }
 
         var appointed = new DateTime(2022, 1, 1);
         var employment = new EmploymentRecord(
             employee.Id, institute.Id, null, null, null, gradeId,
-            "Officer", null, staffCategory, null, null, "active", null, null, null, null,
+            jobTitle, null, staffCategory, null, null, "active", null, null, null, null,
             appointed, null, null, null, appointed, true);
         db.AddRange(institute, employee, employment);
-        if (verifiedDegree)
+        if (verifiedMasters)
+        {
+            var education = new EducationRecord(
+                employee.Id, "University of Ghana", "Applied Chemistry", "MSc",
+                QualificationLevels.MastersOrEquivalent, null, null, null, null, null,
+                new DateTime(2018, 9, 1), new DateTime(2020, 6, 1));
+            education.SetInstitutionRecognitionStatus("verified");
+            education.SetRelevantFieldStatus("verified", null, DateTimeOffset.UtcNow);
+            db.EducationRecords.Add(education);
+        }
+        else if (verifiedDegree)
         {
             var education = new EducationRecord(
                 employee.Id, "University of Ghana", "Laboratory Technology", "BSc",

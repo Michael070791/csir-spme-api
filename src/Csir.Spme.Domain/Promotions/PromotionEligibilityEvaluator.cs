@@ -34,7 +34,7 @@ public static class PromotionEligibilityEvaluator
         var blocking = new List<string>();
         var pending = new List<string>();
 
-        if (!string.Equals(facts.StaffCategory, PromotionConstants.SeniorStaff, StringComparison.OrdinalIgnoreCase))
+        if (!IsAssessableStaffCategory(facts.StaffCategory))
             return Result(PromotionConstants.EligibilityNotApplicable, null, completedYears, blocking, pending, facts);
         if (facts.PathStatus == PromotionConstants.PathRequiresPolicyConfirmation)
             return Result(PromotionConstants.EligibilityPolicyAmbiguity, null, completedYears, ["policy-confirmation-required"], pending, facts);
@@ -60,6 +60,10 @@ public static class PromotionEligibilityEvaluator
             PromotionConstants.EligibilityEligibleForReview;
         return Result(state, serviceRequirementMetOn, completedYears, blocking, pending, facts);
     }
+
+    public static bool IsAssessableStaffCategory(string? staffCategory) =>
+        string.Equals(staffCategory, PromotionConstants.SeniorStaff, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(staffCategory, PromotionConstants.SeniorMember, StringComparison.OrdinalIgnoreCase);
 
     public static string EvidenceCriterionStatus(bool satisfied, bool rejected) =>
         satisfied ? "satisfied" : rejected ? "not-met" : "pending-hr-review";

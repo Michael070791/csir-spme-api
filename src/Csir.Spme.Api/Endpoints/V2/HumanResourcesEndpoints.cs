@@ -36,18 +36,18 @@ internal static class HumanResourcesEndpoints
         employees.MapGet("", GetEmployeesAsync)
             .WithName("Employees_List")
             .WithSummary("List employees.")
-            .WithDescription("Returns a paged employee directory with institute and current employment context. Clients can search staff IDs, names, email, or phone, and filter by institute, division, section, profile status, service status, combined status tokens, HR approval state, and Head of Division/Section (isHod) within the caller's authorized scope. Response includes approvedTotal, unapprovedTotal, and hodTotal for the same scope ignoring the matching tab filter so directory tabs stay accurate, plus the current-year remaining annual leave days for each listed employee.")
+            .WithDescription("Returns a paged employee directory with institute and current employment context, including staff category, Conditions of Service job title, and grade step as separate fields. Clients can search staff IDs, names, email, or phone, and filter by institute, division, section, profile status, service status, combined status tokens, HR approval state, and Head of Division/Section (isHod) within the caller's authorized scope. Response includes approvedTotal, unapprovedTotal, and hodTotal for the same scope ignoring the matching tab filter so directory tabs stay accurate, plus the current-year remaining annual leave days for each listed employee.")
             .Produces<EmployeePageResponse>(StatusCodes.Status200OK);
         employees.MapGet("/{id:guid}", GetEmployeeAsync)
             .WithName("Employees_Get")
             .WithSummary("Get an employee profile.")
-            .WithDescription("Returns one employee profile with institute metadata, contact fields, profile status, HR approval flags, profile image reference, and the current employment summary. Employees outside the caller's authorized institute scope are returned as not found.")
+            .WithDescription("Returns one employee profile with institute metadata, contact fields, profile status, HR approval flags, profile image reference, and the current employment summary. The employment summary includes staff category, Conditions of Service job title (gradeId, gradeCode, gradeName), and grade step as separate fields. Employees outside the caller's authorized institute scope are returned as not found.")
             .Produces<EmployeeDetailResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
         employees.MapPost("", CreateEmployeeAsync)
             .WithName("Employees_Create")
             .WithSummary("Create an employee profile.")
-            .WithDescription("Creates an institute-scoped employee profile and initial current employment record. The API validates required identity fields, institute access, organization references, staff ID uniqueness within the institute, email uniqueness, controlled status values, and leadership role length before writing an audit event.")
+            .WithDescription("Creates an institute-scoped employee profile and initial current employment record. Job title is the Conditions of Service title from the grade catalog when gradeId is supplied. GradeStep is the salary step and does not select a promotion path. The API validates required identity fields, institute access, organization references, staff ID uniqueness within the institute, email uniqueness, controlled status values, and leadership role length before writing an audit event.")
             .RequireAuthorization(AuthorizationPolicies.ManageHumanResources)
             .Produces<EmployeeDetailResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -55,7 +55,7 @@ internal static class HumanResourcesEndpoints
         employees.MapPatch("/{id:guid}", UpdateEmployeeAsync)
             .WithName("Employees_Update")
             .WithSummary("Update an employee profile.")
-            .WithDescription("Updates an accessible employee profile and its current employment context. The same institute, organization reference, controlled value, staff ID, and email checks used at creation are enforced, and inaccessible employees use a non-disclosing not-found response.")
+            .WithDescription("Updates an accessible employee profile and its current employment context. Job title is the Conditions of Service title from the grade catalog when gradeId is supplied. GradeStep is the salary step and does not select a promotion path. The same institute, organization reference, controlled value, staff ID, and email checks used at creation are enforced, and inaccessible employees use a non-disclosing not-found response.")
             .RequireAuthorization(AuthorizationPolicies.ManageHumanResources)
             .Produces<EmployeeDetailResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
@@ -102,7 +102,7 @@ internal static class HumanResourcesEndpoints
         employees.MapGet("/{employeeId:guid}/employment-records", GetEmploymentRecordsAsync)
             .WithName("Employees_ListEmploymentRecords")
             .WithSummary("List an employee's employment records.")
-            .WithDescription("Returns the employee's employment history ordered by most recent effective date, including division and section names, job title, leadership roles, staff category, grade step, specialization, service status, location, pension metadata, and appointment or promotion dates.")
+            .WithDescription("Returns the employee's employment history ordered by most recent effective date, including division and section names, Conditions of Service job title, leadership roles, staff category, grade step, specialization, service status, location, pension metadata, and appointment or promotion dates.")
             .Produces<CollectionResponse<EmploymentRecordResponse>>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
@@ -259,7 +259,7 @@ internal static class HumanResourcesEndpoints
             .MapGet("", GetGradesAsync)
             .WithName("Grades_List")
             .WithSummary("List active employment and promotion grades.")
-            .WithDescription("Returns active grades ordered by rank, including staff category, promotion stream, promotion level, and whether each entry is a canonical promotion grade. Clients may filter by staff category.")
+            .WithDescription("Returns active grades ordered by rank, including staff category, promotion stream, promotion level, and Conditions of Service job title. Clients may filter by staff category.")
             .Produces<CollectionResponse<GradeResponse>>(StatusCodes.Status200OK);
     }
 
@@ -499,6 +499,7 @@ internal static class HumanResourcesEndpoints
         if (validationError is not null)
             return EndpointProblems.FromError(validationError);
 
+        request = await NormalizeEmploymentRequestAsync(request, db, cancellationToken);
         var instituteId = ResolveInstituteId(request, context)!.Value;
         var employee = new Employee(instituteId, request.StaffId.Trim(), request.Surname.Trim(), request.Gender.Trim());
         employee.UpdateProfile(
@@ -544,6 +545,7 @@ internal static class HumanResourcesEndpoints
         if (validationError is not null)
             return EndpointProblems.FromError(validationError);
 
+        request = await NormalizeEmploymentRequestAsync(request, db, cancellationToken);
         var before = employee.StaffId;
         employee.UpdateProfile(
             request.StaffId,
@@ -903,9 +905,13 @@ internal static class HumanResourcesEndpoints
             .ToListAsync(cancellationToken);
         var divisionNames = await GetDivisionNamesAsync(db, records.Select(record => record.DivisionId), cancellationToken);
         var sectionNames = await GetSectionNamesAsync(db, records.Select(record => record.SectionId), cancellationToken);
+        var grades = await GetGradeLookupsAsync(db, records.Select(record => record.GradeId), cancellationToken);
 
         var items = records
-            .Select(record => new EmploymentRecordResponse(
+            .Select(record =>
+            {
+                var grade = record.GradeId.HasValue ? grades.GetValueOrDefault(record.GradeId.Value) : default;
+                return new EmploymentRecordResponse(
                 record.Id,
                 record.DivisionId,
                 record.DivisionId.HasValue ? divisionNames.GetValueOrDefault(record.DivisionId.Value) : null,
@@ -914,6 +920,9 @@ internal static class HumanResourcesEndpoints
                 record.JobTitle,
                 ParseLeadershipRoles(record.LeadershipRoles),
                 record.StaffCategory,
+                record.GradeId,
+                grade.Code,
+                grade.Name,
                 record.GradeStep,
                 record.AreaOfSpecialization,
                 record.ServiceStatus,
@@ -927,7 +936,8 @@ internal static class HumanResourcesEndpoints
                 record.PromotionDate,
                 record.EffectiveFrom,
                 record.EffectiveTo,
-                record.IsCurrent))
+                record.IsCurrent);
+            })
             .ToList();
 
         return TypedResults.Ok(new CollectionResponse<EmploymentRecordResponse>(items, items.Count));
@@ -1359,12 +1369,14 @@ internal static class HumanResourcesEndpoints
             .ToListAsync(cancellationToken);
         var divisionNames = await GetDivisionNamesAsync(db, currentRecords.Select(record => record.DivisionId), cancellationToken);
         var sectionNames = await GetSectionNamesAsync(db, currentRecords.Select(record => record.SectionId), cancellationToken);
+        var grades = await GetGradeLookupsAsync(db, currentRecords.Select(record => record.GradeId), cancellationToken);
 
         return currentRecords
             .GroupBy(record => record.EmployeeId)
             .ToDictionary(group => group.Key, group =>
             {
                 var record = group.First();
+                var grade = record.GradeId.HasValue ? grades.GetValueOrDefault(record.GradeId.Value) : default;
                 return new EmployeeCurrentEmploymentSummary(
                     record.DivisionId,
                     record.DivisionId.HasValue ? divisionNames.GetValueOrDefault(record.DivisionId.Value) : null,
@@ -1373,6 +1385,9 @@ internal static class HumanResourcesEndpoints
                     record.JobTitle,
                     ParseLeadershipRoles(record.LeadershipRoles),
                     record.StaffCategory,
+                    record.GradeId,
+                    grade.Code,
+                    grade.Name,
                     record.GradeStep,
                     record.AreaOfSpecialization,
                     record.ServiceStatus,
@@ -1522,6 +1537,21 @@ internal static class HumanResourcesEndpoints
             currentEmployment.GetValueOrDefault(employee.Id));
     }
 
+    private static async Task<UpsertEmployeeRequest> NormalizeEmploymentRequestAsync(
+        UpsertEmployeeRequest request,
+        SpmeDbContext db,
+        CancellationToken cancellationToken)
+    {
+        if (!request.GradeId.HasValue)
+            return request;
+
+        var gradeName = await db.Grades.AsNoTracking()
+            .Where(grade => grade.Id == request.GradeId.Value && grade.IsActive)
+            .Select(grade => grade.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+        return string.IsNullOrWhiteSpace(gradeName) ? request : request with { JobTitle = gradeName };
+    }
+
     private static EmploymentRecord CreateEmploymentRecord(Guid employeeId, Guid instituteId, UpsertEmployeeRequest request) =>
         new(
             employeeId,
@@ -1624,9 +1654,19 @@ internal static class HumanResourcesEndpoints
                 return Error.Validation("Selected section does not belong to the selected division.");
         }
 
-        if (request.GradeId.HasValue &&
-            !await db.Grades.AsNoTracking().AnyAsync(grade => grade.Id == request.GradeId.Value, cancellationToken))
-            return Error.Validation("Selected grade is not available.");
+        if (request.GradeId.HasValue)
+        {
+            var grade = await db.Grades.AsNoTracking()
+                .Where(candidate => candidate.Id == request.GradeId.Value && candidate.IsActive)
+                .Select(candidate => new { candidate.StaffCategory })
+                .FirstOrDefaultAsync(cancellationToken);
+            if (grade is null)
+                return Error.Validation("Selected grade is not available.");
+            if (!string.IsNullOrWhiteSpace(request.StaffCategory) &&
+                !string.IsNullOrWhiteSpace(grade.StaffCategory) &&
+                !string.Equals(grade.StaffCategory, request.StaffCategory.Trim(), StringComparison.OrdinalIgnoreCase))
+                return Error.Validation("Selected grade does not belong to the selected staff category.");
+        }
 
         return null;
     }
@@ -1774,6 +1814,20 @@ internal static class HumanResourcesEndpoints
         {
             // The bounded cleanup worker retries deleted records whose storage deletion is incomplete.
         }
+    }
+
+    private static async Task<Dictionary<Guid, (string Code, string Name)>> GetGradeLookupsAsync(
+        SpmeDbContext db,
+        IEnumerable<Guid?> gradeIds,
+        CancellationToken cancellationToken)
+    {
+        var ids = gradeIds.Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        if (ids.Length == 0)
+            return [];
+
+        return await db.Grades.AsNoTracking()
+            .Where(grade => ids.Contains(grade.Id))
+            .ToDictionaryAsync(grade => grade.Id, grade => (grade.Code, grade.Name), cancellationToken);
     }
 
     private static async Task<Dictionary<Guid, string>> GetDivisionNamesAsync(

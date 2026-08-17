@@ -5,7 +5,7 @@ namespace Csir.Spme.Domain.Promotions;
 public static class PromotionStatusMessages
 {
     public const string SeniorMemberComingSoon =
-        "Senior Member promotion review is coming soon. This portal currently assesses Senior Staff under Conditions of Service Sections 20 to 22. You cannot start a promotion application yet.";
+        "Senior Member promotion review for this job title is coming soon. Assistant Research Scientist (non-PhD) is assessed under the 5-year M.Sc. upgrade to Research Scientist. You cannot start a promotion application for this title yet.";
 
     public const string JuniorStaffNotInScheme =
         "Junior Staff are not in the current Senior Staff promotion scheme. You cannot start a promotion application from this portal.";
@@ -17,10 +17,10 @@ public static class PromotionStatusMessages
         "HR has not opened a 1 January promotion cycle yet. When the next cycle opens, Senior Staff time in grade is counted to that 1 January.";
 
     public const string NoCanonicalGrade =
-        "HR still needs to assign your canonical promotion grade before a Conditions of Service path can be assessed. Job title text cannot select a path.";
+        "HR still needs to assign your Conditions of Service job title from the catalog before a promotion path can be assessed. Staff category and grade step cannot select a path.";
 
     public const string NoMatchingPath =
-        "No approved Senior Staff promotion path matches your present grade. HR must map the grade before a review can start.";
+        "No approved Senior Staff promotion path matches your job title. HR must select the correct Conditions of Service title before a review can start.";
 
     public const string EligibleAwaitingAssessment =
         "You meet the documented checks. HR still needs to open an assessment before a submission can start.";
