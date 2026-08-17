@@ -55,6 +55,21 @@ internal static class EmployeeProfileEndpoints
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
 
+        profile.MapGet("/self-work", GetSelfWorkAsync)
+            .WithName("EmployeeProfile_GetSelfWork")
+            .WithSummary("Get the authenticated employee's work and grade history.")
+            .WithDescription("Returns the date of first appointment, current grade, years in the present grade, and promotion dates for each grade in the employee's promotion ladder. Other employee identifiers receive a non-disclosing not-found response.")
+            .Produces<EmployeeSelfWorkResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
+        profile.MapPatch("/self-work", UpdateSelfWorkAsync)
+            .WithName("EmployeeProfile_UpdateSelfWork")
+            .WithSummary("Update self-reported promotion dates for prior and current grades.")
+            .WithDescription("Stores staff-entered promotion dates for grades in the employee's promotion ladder. The date of first appointment remains HR-controlled. Current-grade dates also update the current employment promotion date used by promotion status.")
+            .Produces<EmployeeSelfWorkResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(StatusCodes.Status400BadRequest)
+            .ProducesProblem(StatusCodes.Status404NotFound);
+
         profile.MapGet("/documents", ListDocumentsAsync)
             .WithName("EmployeeProfile_ListDocuments")
             .WithSummary("List labeled profile documents for an accessible employee.")
@@ -268,6 +283,52 @@ internal static class EmployeeProfileEndpoints
             employee.Phone,
             employee.Address,
             employee.UpdatedAt));
+    }
+
+    private static async Task<Results<Ok<EmployeeSelfWorkResponse>, ProblemHttpResult>> GetSelfWorkAsync(
+        Guid employeeId,
+        SpmeDbContext db,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        if (!IsCurrentEmployee(context, employeeId))
+            return EndpointProblems.FromError(Error.NotFound("Employee not found."));
+
+        var response = await EmployeeSelfWorkService.BuildAsync(employeeId, db, ct);
+        if (response is null)
+            return EndpointProblems.FromError(Error.NotFound("Employee not found."));
+
+        return TypedResults.Ok(response);
+    }
+
+    private static async Task<Results<Ok<EmployeeSelfWorkResponse>, ProblemHttpResult>> UpdateSelfWorkAsync(
+        Guid employeeId,
+        UpdateEmployeeSelfWorkRequest request,
+        SpmeDbContext db,
+        IAuditService audit,
+        HttpContext context,
+        CancellationToken ct)
+    {
+        if (!IsCurrentEmployee(context, employeeId))
+            return EndpointProblems.FromError(Error.NotFound("Employee not found."));
+
+        var employee = await db.Employees.AsNoTracking().AnyAsync(x => x.Id == employeeId, ct);
+        if (!employee)
+            return EndpointProblems.FromError(Error.NotFound("Employee not found."));
+
+        var validationError = await EmployeeSelfWorkService.ValidateUpdateAsync(employeeId, request, db, ct);
+        if (validationError is not null)
+            return EndpointProblems.FromError(validationError);
+
+        await EmployeeSelfWorkService.ApplyUpdateAsync(employeeId, request, db, ct);
+        await audit.RecordAndSaveAsync("employee.self-work-updated", "Employee", employeeId.ToString(),
+            null, $"grades={request.GradePromotions.Count}", ct);
+
+        var response = await EmployeeSelfWorkService.BuildAsync(employeeId, db, ct);
+        if (response is null)
+            return EndpointProblems.FromError(Error.NotFound("Employee not found."));
+
+        return TypedResults.Ok(response);
     }
 
     private static async Task<Results<Ok<CollectionResponse<EmployeeProfileDocumentResponse>>, ProblemHttpResult>> ListDocumentsAsync(

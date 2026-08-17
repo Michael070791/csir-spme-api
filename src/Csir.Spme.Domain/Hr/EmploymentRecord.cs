@@ -163,6 +163,12 @@ public class EmploymentRecord : BaseEntity
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 
+    public void UpdateSelfPromotionDate(DateTime? promotionDate)
+    {
+        PromotionDate = promotionDate?.Date;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }

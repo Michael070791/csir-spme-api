@@ -427,6 +427,32 @@ public sealed record UpdateEmployeeSelfContactRequest(
     [property: StringLength(32)] string? Phone,
     [property: StringLength(512)] string? ResidentialAddress);
 
+public sealed record EmployeeSelfWorkCurrentGradeResponse(
+    Guid? GradeId,
+    string? GradeCode,
+    string? GradeName);
+
+public sealed record EmployeeSelfWorkGradePromotionResponse(
+    Guid GradeId,
+    string GradeCode,
+    string GradeName,
+    bool IsCurrent,
+    DateTime? PromotionDate);
+
+public sealed record EmployeeSelfWorkResponse(
+    DateTime? AppointmentDate,
+    EmployeeSelfWorkCurrentGradeResponse CurrentGrade,
+    decimal YearsInCurrentGrade,
+    IReadOnlyList<EmployeeSelfWorkGradePromotionResponse> GradePromotions,
+    DateTimeOffset UpdatedAt);
+
+public sealed record UpdateEmployeeGradePromotionRequest(
+    Guid GradeId,
+    DateTime? PromotionDate);
+
+public sealed record UpdateEmployeeSelfWorkRequest(
+    IReadOnlyList<UpdateEmployeeGradePromotionRequest> GradePromotions);
+
 public sealed record EmployeeProfileDocumentResponse(
     Guid Id,
     string DocumentType,

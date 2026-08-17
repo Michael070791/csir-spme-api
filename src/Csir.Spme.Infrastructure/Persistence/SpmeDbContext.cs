@@ -72,6 +72,7 @@ public partial class SpmeDbContext : IdentityDbContext<User, Role, Guid>, IAppli
     public DbSet<EmployeeSpouse> EmployeeSpouses => Set<EmployeeSpouse>();
     public DbSet<EmployeeChild> EmployeeChildren => Set<EmployeeChild>();
     public DbSet<EducationRecord> EducationRecords => Set<EducationRecord>();
+    public DbSet<EmployeeGradePromotionDate> EmployeeGradePromotionDates => Set<EmployeeGradePromotionDate>();
     public DbSet<EmployeeDocument> EmployeeDocuments => Set<EmployeeDocument>();
     public DbSet<EmployeeDocumentUploadSession> EmployeeDocumentUploadSessions => Set<EmployeeDocumentUploadSession>();
     public DbSet<PerformanceAppraisal> PerformanceAppraisals => Set<PerformanceAppraisal>();

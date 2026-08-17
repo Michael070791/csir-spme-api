@@ -213,3 +213,13 @@ public class EmployeeImportFieldMappingConfiguration : IEntityTypeConfiguration<
         builder.HasIndex(x => new { x.BatchId, x.SourceColumn }).IsUnique();
     }
 }
+
+public class EmployeeGradePromotionDateConfiguration : IEntityTypeConfiguration<EmployeeGradePromotionDate>
+{
+    public void Configure(EntityTypeBuilder<EmployeeGradePromotionDate> builder)
+    {
+        builder.ToTable("EmployeeGradePromotionDates", "hr");
+        builder.HasKey(x => x.Id);
+        builder.HasIndex(x => new { x.EmployeeId, x.GradeId }).IsUnique();
+    }
+}
