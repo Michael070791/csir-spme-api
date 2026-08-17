@@ -17,6 +17,8 @@ public partial class SpmeDbContext
     private static readonly string[] HodIdentityRoles =
         ["HeadOfSection", "HeadOfDivision", "Director", "InstituteDirector"];
 
+    private const string ScientificSecretaryRole = "ScientificSecretary";
+
     async Task<IApplicationTransaction> IStaffQuarterlyReportRepository.BeginSerializableTransactionAsync(
         CancellationToken ct) =>
         new EfApplicationTransaction(await Database.BeginTransactionAsync(IsolationLevel.Serializable, ct));
@@ -91,6 +93,46 @@ public partial class SpmeDbContext
         .Take(200)
         .ToListAsync(ct);
 
+    async Task<IReadOnlyList<Project>> IStaffQuarterlyReportRepository.ListEmployeeProjectOptionsAsync(
+        Guid instituteId, Guid employeeId, Guid userId, CancellationToken ct) =>
+        await Projects.AsNoTracking()
+            .Where(project => project.InstituteId == instituteId &&
+                project.Status != ProjectStatuses.Archived &&
+                project.Status != ProjectStatuses.Cancelled &&
+                (project.LeadEmployeeId == employeeId || project.CreatedByUserId == userId) &&
+                ProjectInceptions.Any(inception => inception.ProjectId == project.Id))
+            .OrderBy(project => project.Name)
+            .Take(200)
+            .ToListAsync(ct);
+
+    async Task<IReadOnlyList<StaffQuarterlyFormOneSummary>> IStaffQuarterlyReportRepository.ListInstituteFormOneProjectsAsync(
+        Guid instituteId, CancellationToken ct)
+    {
+        var rows = await (
+            from project in Projects.AsNoTracking()
+            join inception in ProjectInceptions.AsNoTracking() on project.Id equals inception.ProjectId
+            where project.InstituteId == instituteId &&
+                  project.Status != ProjectStatuses.Archived &&
+                  project.Status != ProjectStatuses.Cancelled
+            orderby project.Name
+            select new { project.Id, project.Name, project.Pin, project.PinAssignedAt, inception.InceptionCompletedAt })
+            .Take(500)
+            .ToListAsync(ct);
+
+        return rows.Select(row => new StaffQuarterlyFormOneSummary(
+            row.Id,
+            row.Name,
+            true,
+            row.InceptionCompletedAt.HasValue,
+            row.Pin,
+            string.IsNullOrWhiteSpace(row.Pin) ? "pending" : "assigned",
+            row.PinAssignedAt)).ToList();
+    }
+
+    Task<Csir.Spme.Domain.Org.Institute?> IStaffQuarterlyReportRepository.FindInstituteAsync(
+        Guid instituteId, CancellationToken ct) =>
+        Institutes.AsNoTracking().SingleOrDefaultAsync(item => item.Id == instituteId, ct);
+
     async Task<IReadOnlyList<Technology>> IStaffQuarterlyReportRepository.ListTechnologyOptionsAsync(
         Guid instituteId, CancellationToken ct) => await Technologies.AsNoTracking()
         .Where(technology => technology.InstituteId == instituteId &&
@@ -114,7 +156,7 @@ public partial class SpmeDbContext
             var sectionHeads = await QueryHodCandidatesAsync(
                 instituteId, employeeId, scope.SectionId, null, preferSectionLeadership: true, ct);
             if (sectionHeads.Count > 0)
-                return sectionHeads;
+                return MergeReviewers(sectionHeads, await QueryScientificSecretariesAsync(instituteId, employeeId, ct));
         }
 
         if (scope.DivisionId.HasValue)
@@ -122,11 +164,78 @@ public partial class SpmeDbContext
             var divisionHeads = await QueryHodCandidatesAsync(
                 instituteId, employeeId, null, scope.DivisionId, preferSectionLeadership: false, ct);
             if (divisionHeads.Count > 0)
-                return divisionHeads;
+                return MergeReviewers(divisionHeads, await QueryScientificSecretariesAsync(instituteId, employeeId, ct));
         }
 
-        return await QueryHodCandidatesAsync(
-            instituteId, employeeId, null, null, preferSectionLeadership: false, ct);
+        return MergeReviewers(
+            await QueryHodCandidatesAsync(instituteId, employeeId, null, null, preferSectionLeadership: false, ct),
+            await QueryScientificSecretariesAsync(instituteId, employeeId, ct));
+    }
+
+    private static IReadOnlyList<StaffQuarterlyReviewer> MergeReviewers(
+        IReadOnlyList<StaffQuarterlyReviewer> primary,
+        IReadOnlyList<StaffQuarterlyReviewer> secondary)
+    {
+        var seen = primary.Select(item => item.User.Id).ToHashSet();
+        return primary.Concat(secondary.Where(item => seen.Add(item.User.Id))).ToList();
+    }
+
+    private async Task<IReadOnlyList<StaffQuarterlyReviewer>> QueryScientificSecretariesAsync(
+        Guid instituteId, Guid excludeEmployeeId, CancellationToken ct)
+    {
+        var identityMatches = await (
+            from user in Users.AsNoTracking()
+            join employee in Employees.AsNoTracking() on user.EmployeeId equals employee.Id
+            join employment in EmploymentRecords.AsNoTracking() on employee.Id equals employment.EmployeeId
+            join userRole in UserRoles.AsNoTracking() on user.Id equals userRole.UserId
+            join role in Roles.AsNoTracking() on userRole.RoleId equals role.Id
+            where user.InstituteId == instituteId &&
+                  user.AccountStatus == "active" &&
+                  user.EmployeeId != null &&
+                  user.EmployeeId != excludeEmployeeId &&
+                  employee.ProfileStatus == EmployeeProfileStatuses.Active &&
+                  employment.IsCurrent &&
+                  employment.InstituteId == instituteId &&
+                  role.Name == ScientificSecretaryRole
+            orderby employee.Surname, employee.OtherNames
+            select new { User = user, Employee = employee })
+            .Take(20)
+            .ToListAsync(ct);
+
+        var fromIdentity = identityMatches
+            .GroupBy(item => item.User.Id)
+            .Select(group => group.First())
+            .Select(item => new StaffQuarterlyReviewer(item.User, item.Employee, ScientificSecretaryRole))
+            .ToList();
+
+        var employmentMatches = await (
+            from user in Users.AsNoTracking()
+            join employee in Employees.AsNoTracking() on user.EmployeeId equals employee.Id
+            join employment in EmploymentRecords.AsNoTracking() on employee.Id equals employment.EmployeeId
+            where user.InstituteId == instituteId &&
+                  user.AccountStatus == "active" &&
+                  user.EmployeeId != null &&
+                  user.EmployeeId != excludeEmployeeId &&
+                  employee.ProfileStatus == EmployeeProfileStatuses.Active &&
+                  employment.IsCurrent &&
+                  employment.InstituteId == instituteId &&
+                  employment.LeadershipRoles != null &&
+                  (employment.LeadershipRoles.Contains("scientific secretary") ||
+                   employment.LeadershipRoles.Contains("Scientific Secretary") ||
+                   employment.LeadershipRoles.Contains("scientific-secretary") ||
+                   employment.LeadershipRoles.Contains("ScientificSecretary"))
+            orderby employee.Surname, employee.OtherNames
+            select new { User = user, Employee = employee })
+            .Take(20)
+            .ToListAsync(ct);
+
+        var employmentReviewers = employmentMatches
+            .GroupBy(item => item.User.Id)
+            .Select(group => group.First())
+            .Select(item => new StaffQuarterlyReviewer(item.User, item.Employee, ScientificSecretaryRole))
+            .ToList();
+
+        return MergeReviewers(fromIdentity, employmentReviewers);
     }
 
     async Task<IReadOnlyList<StaffQuarterlyReviewer>> IStaffQuarterlyReportRepository.SearchStaffReviewerCandidatesAsync(
@@ -283,6 +392,7 @@ public partial class SpmeDbContext
     {
         if (roles.Contains("HeadOfSection", StringComparer.OrdinalIgnoreCase)) return "HeadOfSection";
         if (roles.Contains("HeadOfDivision", StringComparer.OrdinalIgnoreCase)) return "HeadOfDivision";
+        if (roles.Contains(ScientificSecretaryRole, StringComparer.OrdinalIgnoreCase)) return ScientificSecretaryRole;
         if (roles.Contains("InstituteDirector", StringComparer.OrdinalIgnoreCase) ||
             roles.Contains("Director", StringComparer.OrdinalIgnoreCase))
             return "Director";
@@ -342,8 +452,39 @@ public partial class SpmeDbContext
         if (preferred is not null)
             return preferred;
 
+        var scientificSecretary = await FindScientificSecretaryReviewerAsync(
+            instituteId, employeeId, reviewerUserId, ct);
+        if (scientificSecretary is not null)
+            return scientificSecretary;
+
         return await ((IStaffQuarterlyReportRepository)this)
             .FindInstituteStaffReviewerAsync(instituteId, employeeId, reviewerUserId, ct);
+    }
+
+    private async Task<StaffQuarterlyReviewer?> FindScientificSecretaryReviewerAsync(
+        Guid instituteId, Guid excludeEmployeeId, Guid reviewerUserId, CancellationToken ct)
+    {
+        var match = await (
+            from user in Users.AsNoTracking()
+            join employee in Employees.AsNoTracking() on user.EmployeeId equals employee.Id
+            join employment in EmploymentRecords.AsNoTracking() on employee.Id equals employment.EmployeeId
+            join userRole in UserRoles.AsNoTracking() on user.Id equals userRole.UserId
+            join role in Roles.AsNoTracking() on userRole.RoleId equals role.Id
+            where user.Id == reviewerUserId &&
+                  user.InstituteId == instituteId &&
+                  user.AccountStatus == "active" &&
+                  user.EmployeeId != null &&
+                  user.EmployeeId != excludeEmployeeId &&
+                  employee.ProfileStatus == EmployeeProfileStatuses.Active &&
+                  employment.IsCurrent &&
+                  employment.InstituteId == instituteId &&
+                  role.Name == ScientificSecretaryRole
+            select new { User = user, Employee = employee })
+            .FirstOrDefaultAsync(ct);
+
+        return match is null
+            ? null
+            : new StaffQuarterlyReviewer(match.User, match.Employee, ScientificSecretaryRole);
     }
 
     async Task<IReadOnlyList<StaffQuarterlyReportAggregate>> IStaffQuarterlyReportRepository.ListMineAsync(
@@ -368,6 +509,21 @@ public partial class SpmeDbContext
             .OrderByDescending(report => report.Id)
             .Select(report => report.Id)
             .Take(100)
+            .ToListAsync(ct);
+        return await LoadStaffQuarterlyAggregatesAsync(ids, false, ct);
+    }
+
+    async Task<IReadOnlyList<StaffQuarterlyReportAggregate>> IStaffQuarterlyReportRepository.ListCollationReportsAsync(
+        Guid instituteId, Guid reportingPeriodId, CancellationToken ct)
+    {
+        var ids = await Reports.AsNoTracking()
+            .Where(report => report.ReportScope == ReportScopes.EmployeeQuarterly &&
+                             report.ReportingPeriodId == reportingPeriodId &&
+                             (report.Status == ReportStatuses.Submitted || report.Status == ReportStatuses.Approved))
+            .Join(Employees.AsNoTracking(), report => report.OwnerEmployeeId, employee => employee.Id,
+                (report, employee) => new { report.Id, employee.InstituteId })
+            .Where(item => item.InstituteId == instituteId)
+            .Select(item => item.Id)
             .ToListAsync(ct);
         return await LoadStaffQuarterlyAggregatesAsync(ids, false, ct);
     }
@@ -446,6 +602,26 @@ public partial class SpmeDbContext
         if (project is null)
             return false;
 
+        if (project.LeadEmployeeId == employeeId)
+            return true;
+
+        if (reviewerUserId.HasValue && project.CreatedByUserId == reviewerUserId)
+            return true;
+
+        if (reviewerUserId.HasValue)
+        {
+            var isScientificSecretary = await (
+                from userRole in UserRoles.AsNoTracking()
+                join role in Roles.AsNoTracking() on userRole.RoleId equals role.Id
+                where userRole.UserId == reviewerUserId &&
+                      role.Name == ScientificSecretaryRole
+                select userRole.UserId).AnyAsync(ct);
+            if (isScientificSecretary && await Users.AsNoTracking().AnyAsync(user =>
+                user.Id == reviewerUserId && user.InstituteId == project.InstituteId, ct) &&
+                await ProjectInceptions.AsNoTracking().AnyAsync(item => item.ProjectId == projectId, ct))
+                return true;
+        }
+
         if (await Reports.AnyAsync(report => report.ReportScope == ReportScopes.EmployeeQuarterly &&
             report.OwnerEmployeeId == employeeId && report.InstituteId == project.InstituteId &&
             ReportProjects.Any(link => link.ReportId == report.Id && link.ProjectId == projectId), ct))
@@ -474,6 +650,23 @@ public partial class SpmeDbContext
         Guid instituteId, string code, string name, CancellationToken ct) => Projects.AsNoTracking()
         .FirstOrDefaultAsync(project => project.InstituteId == instituteId &&
             (project.Code == code || project.Name == name), ct);
+
+    Task<Project?> IStaffQuarterlyReportRepository.FindProjectByNameForEmployeeAsync(
+        Guid instituteId, Guid employeeId, Guid userId, string name, CancellationToken ct) =>
+        Projects.AsNoTracking()
+            .FirstOrDefaultAsync(project => project.InstituteId == instituteId &&
+                project.Name == name &&
+                (project.LeadEmployeeId == employeeId || project.CreatedByUserId == userId), ct);
+
+    Task<bool> IStaffQuarterlyReportRepository.PinExistsAsync(
+        Guid instituteId, string pin, Guid? excludeProjectId, CancellationToken ct) =>
+        Projects.AnyAsync(project => project.InstituteId == instituteId &&
+            project.Pin == pin &&
+            (!excludeProjectId.HasValue || project.Id != excludeProjectId.Value), ct);
+
+    Task<Project?> IStaffQuarterlyReportRepository.FindProjectForPinAssignmentAsync(
+        Guid instituteId, Guid projectId, CancellationToken ct) =>
+        Projects.SingleOrDefaultAsync(project => project.InstituteId == instituteId && project.Id == projectId, ct);
 
     Task<Technology?> IStaffQuarterlyReportRepository.FindTechnologyByCodeOrNameAsync(
         Guid instituteId, string code, string name, CancellationToken ct) => Technologies.AsNoTracking()
@@ -540,7 +733,8 @@ public partial class SpmeDbContext
             join role in Roles.AsNoTracking() on userRole.RoleId equals role.Id
             where reviewerUserIds.Contains(userRole.UserId) &&
                 (role.Name == "HeadOfSection" || role.Name == "HeadOfDivision" ||
-                 role.Name == "Director" || role.Name == "InstituteDirector")
+                 role.Name == "Director" || role.Name == "InstituteDirector" ||
+                 role.Name == ScientificSecretaryRole)
             select new { userRole.UserId, Role = role.Name! })
             .ToListAsync(ct);
         var roleByUser = roles

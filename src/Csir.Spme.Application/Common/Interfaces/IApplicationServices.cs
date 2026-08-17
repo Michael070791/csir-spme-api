@@ -230,6 +230,7 @@ public sealed record StaffQuarterlyReportNotification(
 public sealed record StaffQuarterlyProjectReportContent(
     string Code,
     string Title,
+    string? Pin,
     string LeadName,
     string EstimatedDuration,
     string SponsorName,
@@ -239,6 +240,7 @@ public sealed record StaffQuarterlyProjectReportContent(
     string? Justification,
     string? ExpectedBeneficiaries,
     string? PotentialTechnology,
+    string? Commercialization,
     string? ContributionToKnowledge,
     string ProgressSummary,
     string? ProgressKeyResults,

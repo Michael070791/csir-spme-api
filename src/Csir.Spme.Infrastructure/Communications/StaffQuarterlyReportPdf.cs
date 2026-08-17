@@ -50,6 +50,7 @@ public static class StaffQuarterlyReportPdf
             lines.AddRange(
             [
                 $"FORM 1 - PROJECT INCEPTION: {project.Title}",
+                $"PIN: {Text(project.Pin, "PIN not yet assigned")}",
                 $"Project code: {Text(project.Code, "Not provided")}",
                 $"Principal investigator: {Text(project.LeadName, "Not provided")}",
                 $"Estimated duration: {Text(project.EstimatedDuration, "Not provided")}",
@@ -65,6 +66,8 @@ public static class StaffQuarterlyReportPdf
                 Text(project.ExpectedBeneficiaries, "Not provided"),
                 "Potential technology",
                 Text(project.PotentialTechnology, "Not provided"),
+                "Commercialization",
+                Text(project.Commercialization, "Not provided"),
                 "Contribution to knowledge",
                 Text(project.ContributionToKnowledge, "Not provided"),
                 string.Empty,

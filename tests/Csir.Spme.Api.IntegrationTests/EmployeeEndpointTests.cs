@@ -14,6 +14,7 @@ using Csir.Spme.Domain.Leave;
 using Csir.Spme.Domain.Org;
 using Csir.Spme.Infrastructure.Persistence;
 using FluentAssertions;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -575,6 +576,113 @@ public class EmployeeEndpointTests : IClassFixture<SpmeApiFactory>
         updated.CurrentEmployment.PromotionDate.Should().Be(new DateTime(2026, 1, 1));
         updated.CurrentEmployment.GradeId.Should().BeNull();
         updated.CurrentEmployment.GradeName.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Employee_Update_Grants_And_Revokes_ScientificSecretary_Identity_Role()
+    {
+        var suffix = Guid.NewGuid().ToString("N");
+        var instituteId = await SeedInstituteAsync($"SSROLE-{suffix[..8]}");
+        var (divisionId, sectionId) = await SeedDivisionAndSectionAsync(instituteId, $"Ops {suffix[..6]}", $"Team {suffix[..6]}");
+        var staffId = $"SSROLE-STF-{suffix}";
+
+        var createRequest = new UpsertEmployeeRequest(
+            InstituteId: instituteId,
+            StaffId: staffId,
+            Prefix: "Dr.",
+            Surname: "Secretary",
+            OtherNames: "Sam",
+            Gender: "male",
+            DateOfBirth: new DateTime(1988, 4, 2),
+            Nationality: "Ghanaian",
+            Religion: "Christianity",
+            MaritalStatus: "married",
+            PrimaryEmail: $"{staffId.ToLowerInvariant()}@example.test",
+            Phone: "0240008888",
+            ProfileStatus: "active",
+            IsHrApproved: true,
+            DivisionId: divisionId,
+            SectionId: sectionId,
+            GradeId: null,
+            JobTitle: "Research Officer",
+            LeadershipRoles: null,
+            StaffCategory: "senior-staff",
+            GradeStep: "S1",
+            AreaOfSpecialization: "Science policy",
+            ServiceStatus: "active",
+            Organization: "CSIR",
+            Location: "Accra",
+            Region: "Greater Accra",
+            District: "Legon",
+            PensionType: "SSNIT",
+            PensionId: "PEN-SS",
+            AppointmentDate: new DateTime(2020, 1, 1),
+            PromotionDate: null);
+
+        var createResponse = await _client.PostAsJsonAsync("/api/v2/employees", createRequest);
+        createResponse.StatusCode.Should().Be(HttpStatusCode.Created);
+        var created = await createResponse.Content.ReadFromJsonAsync<EmployeeDetailResponse>();
+        created.Should().NotBeNull();
+
+        Guid linkedUserId;
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+            var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<Role>>();
+            if (await roleManager.FindByNameAsync(SpmeRoles.ScientificSecretary) is null)
+            {
+                (await roleManager.CreateAsync(new Role(
+                    "scientific-secretary",
+                    SpmeRoles.ScientificSecretary,
+                    "Scientific Secretary",
+                    true))).Succeeded.Should().BeTrue();
+            }
+
+            var user = new User($"{staffId.ToLowerInvariant()}@example.test", SpmeRoles.Employee)
+            {
+                Email = createRequest.PrimaryEmail,
+                EmailConfirmed = true
+            };
+            user.LinkEmployee(created!.Id, instituteId);
+            (await userManager.CreateAsync(user)).Succeeded.Should().BeTrue();
+            linkedUserId = user.Id;
+        }
+
+        var assignRequest = createRequest with { LeadershipRoles = ["Scientific Secretary"] };
+        using (var assignMessage = new HttpRequestMessage(HttpMethod.Patch, $"/api/v2/employees/{created!.Id}")
+        {
+            Content = JsonContent.Create(assignRequest)
+        })
+        {
+            var assignResponse = await _client.SendAsync(assignMessage);
+            assignResponse.StatusCode.Should().Be(HttpStatusCode.OK, await assignResponse.Content.ReadAsStringAsync());
+        }
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+            var user = await userManager.FindByIdAsync(linkedUserId.ToString());
+            user.Should().NotBeNull();
+            (await userManager.IsInRoleAsync(user!, SpmeRoles.ScientificSecretary)).Should().BeTrue();
+        }
+
+        var revokeRequest = createRequest with { LeadershipRoles = [] };
+        using (var revokeMessage = new HttpRequestMessage(HttpMethod.Patch, $"/api/v2/employees/{created!.Id}")
+        {
+            Content = JsonContent.Create(revokeRequest)
+        })
+        {
+            var revokeResponse = await _client.SendAsync(revokeMessage);
+            revokeResponse.StatusCode.Should().Be(HttpStatusCode.OK, await revokeResponse.Content.ReadAsStringAsync());
+        }
+
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var userManager = scope.ServiceProvider.GetRequiredService<UserManager<User>>();
+            var user = await userManager.FindByIdAsync(linkedUserId.ToString());
+            user.Should().NotBeNull();
+            (await userManager.IsInRoleAsync(user!, SpmeRoles.ScientificSecretary)).Should().BeFalse();
+        }
     }
 
     [Fact]

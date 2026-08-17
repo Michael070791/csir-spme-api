@@ -6,6 +6,8 @@ namespace Csir.Spme.Domain.Projects;
 public class Project : InstituteScopedEntity
 {
     public string Code { get; private set; } = string.Empty;
+    public string? Pin { get; private set; }
+    public DateTimeOffset? PinAssignedAt { get; private set; }
     public string Name { get; private set; } = string.Empty;
     public Guid? LeadEmployeeId { get; private set; }
     public string Objective { get; private set; } = string.Empty;
@@ -150,6 +152,17 @@ public class Project : InstituteScopedEntity
         }
 
         Status = targetStatus;
+        return Result.Success();
+    }
+
+    public Result<bool> AssignPin(string pin, DateTimeOffset assignedAt)
+    {
+        var normalized = pin.Trim();
+        if (string.IsNullOrWhiteSpace(normalized) || normalized.Length > 64)
+            return Result.Failure(Error.Validation("A PIN of at most 64 characters is required."));
+
+        Pin = normalized;
+        PinAssignedAt = assignedAt;
         return Result.Success();
     }
 }

@@ -28,11 +28,11 @@ public sealed class StaffQuarterlyReportService(
         if (identity.IsFailure)
             return Result<StaffQuarterlyReportOptions>.Failure(identity.Error!);
 
-        var (employeeId, instituteId, _) = identity.Value!;
+        var (employeeId, instituteId, userId) = identity.Value!;
         var currentYear = DateTime.UtcNow.Year;
         await repository.EnsureOpenCurrentYearQuartersAsync(instituteId, currentYear, ct);
         var periods = await repository.ListOpenQuarterlyPeriodsAsync(instituteId, ct);
-        var projects = await repository.ListProjectOptionsAsync(instituteId, ct);
+        var projects = await repository.ListEmployeeProjectOptionsAsync(instituteId, employeeId, userId, ct);
         var inceptions = await repository.FindProjectInceptionsAsync(projects.Select(item => item.Id).ToList(), ct);
         var technologies = await repository.ListTechnologyOptionsAsync(instituteId, ct);
         var reviewers = await repository.ListReviewerOptionsAsync(employeeId, instituteId, ct);
@@ -40,8 +40,8 @@ public sealed class StaffQuarterlyReportService(
         return Result<StaffQuarterlyReportOptions>.Success(new(
             periods.Select(period => new StaffQuarterlyPeriodOption(period.Id, period.Code, period.Name,
                 period.StartDate, period.EndDate, period.DueDate)).ToList(),
-            projects.Select(project => new StaffQuarterlyCatalogOption(project.Id, project.Code, project.Name,
-                project.Status, inceptions.TryGetValue(project.Id, out var inception) && inception.IsComplete)).ToList(),
+            projects.Where(project => inceptions.TryGetValue(project.Id, out var inception) && inception.IsComplete)
+                .Select(project => MapCatalogOption(project, true, project.Pin)).ToList(),
             technologies.Select(technology => new StaffQuarterlyCatalogOption(technology.Id, technology.Code,
                 technology.Name, technology.Status)).ToList(),
             reviewers.Select(MapReviewerOption).ToList()));
@@ -105,6 +105,103 @@ public sealed class StaffQuarterlyReportService(
 
         return Result<StaffQuarterlyProjectInceptionResponse>.Success(
             await MapInceptionAsync(project, await repository.FindProjectInceptionAsync(projectId, ct), ct));
+    }
+
+    public async Task<Result<IReadOnlyList<StaffQuarterlyFormOneSummary>>> ListMyFormOneProjectsAsync(CancellationToken ct)
+    {
+        var identity = RequireEmployeeIdentity();
+        if (identity.IsFailure)
+            return Result<IReadOnlyList<StaffQuarterlyFormOneSummary>>.Failure(identity.Error!);
+
+        var projects = await repository.ListEmployeeProjectOptionsAsync(
+            identity.Value!.InstituteId, identity.Value.EmployeeId, identity.Value.UserId, ct);
+        var inceptions = await repository.FindProjectInceptionsAsync(projects.Select(item => item.Id).ToList(), ct);
+        return Result<IReadOnlyList<StaffQuarterlyFormOneSummary>>.Success(projects.Select(project =>
+        {
+            inceptions.TryGetValue(project.Id, out var inception);
+            return new StaffQuarterlyFormOneSummary(
+                project.Id,
+                project.Name,
+                inception is not null,
+                inception?.IsComplete ?? false,
+                project.Pin,
+                StaffQuarterlyReportSupport.ResolvePinStatus(project.Pin),
+                project.PinAssignedAt);
+        }).ToList());
+    }
+
+    public async Task<Result<IReadOnlyList<StaffQuarterlyFormOneSummary>>> ListInstituteFormOneProjectsAsync(
+        CancellationToken ct)
+    {
+        var reviewer = RequireScientificSecretaryIdentity();
+        if (reviewer.IsFailure)
+            return Result<IReadOnlyList<StaffQuarterlyFormOneSummary>>.Failure(reviewer.Error!);
+
+        var projects = await repository.ListInstituteFormOneProjectsAsync(reviewer.Value!.InstituteId, ct);
+        return Result<IReadOnlyList<StaffQuarterlyFormOneSummary>>.Success(projects);
+    }
+
+    public async Task<Result<IReadOnlyList<StaffQuarterlyCollationEntry>>> ListCollationAsync(
+        Guid reportingPeriodId, CancellationToken ct)
+    {
+        var reviewer = RequireScientificSecretaryIdentity();
+        if (reviewer.IsFailure)
+            return Result<IReadOnlyList<StaffQuarterlyCollationEntry>>.Failure(reviewer.Error!);
+
+        var aggregates = await repository.ListCollationReportsAsync(
+            reviewer.Value!.InstituteId, reportingPeriodId, ct);
+        var entries = aggregates.Select(MapCollationEntry).ToList();
+        return Result<IReadOnlyList<StaffQuarterlyCollationEntry>>.Success(entries);
+    }
+
+    public async Task<Result<StaffQuarterlyProjectInceptionResponse>> AssignProjectPinAsync(
+        Guid projectId, AssignProjectPinCommand command, byte[]? expectedRowVersion, CancellationToken ct)
+    {
+        if (expectedRowVersion is null)
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(
+                Error.PreconditionFailed("An If-Match header is required."));
+
+        var reviewer = RequireScientificSecretaryIdentity();
+        if (reviewer.IsFailure)
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(reviewer.Error!);
+
+        var project = await repository.FindProjectForPinAssignmentAsync(reviewer.Value!.InstituteId, projectId, ct);
+        if (project is null)
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(Error.NotFound("Project not found."));
+
+        var inception = await repository.FindProjectInceptionAsync(projectId, ct);
+        if (inception is null)
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(Error.NotFound("Project not found."));
+
+        var normalizedPin = command.Pin.Trim();
+        if (string.IsNullOrWhiteSpace(normalizedPin) || normalizedPin.Length > 64)
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(Error.Validation(
+                "A PIN of at most 64 characters is required."));
+
+        if (!string.Equals(project.Pin, normalizedPin, StringComparison.Ordinal) &&
+            await repository.PinExistsAsync(reviewer.Value.InstituteId, normalizedPin, project.Id, ct))
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(
+                Error.Conflict("The PIN is already assigned to another project in this institute."));
+
+        var action = string.IsNullOrWhiteSpace(project.Pin) ? "project.pin-assigned" : "project.pin-corrected";
+        var assigned = project.AssignPin(normalizedPin, DateTimeOffset.UtcNow);
+        if (assigned.IsFailure)
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(assigned.Error!);
+
+        unitOfWork.SetOriginalRowVersion(project, expectedRowVersion);
+        try
+        {
+            await audit.RecordAsync(action, "Project", projectId.ToString(), null, $"pin={normalizedPin}", ct);
+            await unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            return Result<StaffQuarterlyProjectInceptionResponse>.Failure(Error.PreconditionFailed(
+                "The project was modified by another request. Reload it and retry."));
+        }
+
+        return Result<StaffQuarterlyProjectInceptionResponse>.Success(
+            await MapInceptionAsync(project, inception, ct));
     }
 
     public async Task<Result<StaffQuarterlyReportResponse>> CreateAsync(
@@ -204,9 +301,11 @@ public sealed class StaffQuarterlyReportService(
                 return Result<StaffQuarterlyReportResponse>.Failure(Error.Conflict(
                     "Every linked project must have a completed Form 1 before submission."));
             var link = aggregate.ReportProjects.Single(item => item.ProjectId == project.Id);
-            if (string.IsNullOrWhiteSpace(link.ProgressSummary))
+            if (string.IsNullOrWhiteSpace(link.ProgressSummary) ||
+                string.IsNullOrWhiteSpace(link.ProgressKeyResults) ||
+                string.IsNullOrWhiteSpace(link.WayForward))
                 return Result<StaffQuarterlyReportResponse>.Failure(Error.Conflict(
-                    "Every linked project must include Form 2 progress before submission."));
+                    "Every linked project must include Form 2 progress, key results, and way forward before submission."));
         }
 
         var conceptNoteIds = inceptions.Values.Select(item => item.ConceptNoteFileId).OfType<Guid>().Distinct().ToList();
@@ -245,7 +344,9 @@ public sealed class StaffQuarterlyReportService(
                     project.Justification,
                     inception.ExpectedBeneficiaries,
                     inception.PotentialTechnology,
-                    inception.ContributionToKnowledge);
+                    inception.Commercialization,
+                    inception.ContributionToKnowledge,
+                    project.Pin);
             }
         }
         foreach (var link in aggregate.ReportTechnologies)
@@ -256,6 +357,7 @@ public sealed class StaffQuarterlyReportService(
         var projectReports = aggregate.ReportProjects.Select(link => new StaffQuarterlyProjectReportContent(
             link.ProjectCodeSnapshot ?? string.Empty,
             link.ProjectNameSnapshot ?? string.Empty,
+            link.SnapshotPin,
             link.SnapshotLeadName ?? "Unknown",
             link.SnapshotEstimatedDuration ?? string.Empty,
             link.SnapshotSponsorName ?? string.Empty,
@@ -265,6 +367,7 @@ public sealed class StaffQuarterlyReportService(
             link.SnapshotJustification,
             link.SnapshotExpectedBeneficiaries,
             link.SnapshotPotentialTechnology,
+            link.SnapshotCommercialization,
             link.SnapshotContributionToKnowledge,
             link.ProgressSummary ?? string.Empty,
             link.ProgressKeyResults,
@@ -307,13 +410,13 @@ public sealed class StaffQuarterlyReportService(
         if (fields.Count > 0)
             return Result<StaffQuarterlyCatalogOption>.Failure(Error.Validation(fields));
 
-        var existing = await repository.FindProjectByCodeOrNameAsync(identity.Value!.InstituteId,
-            command.Inception.Code.Trim(), command.Inception.Name.Trim(), ct);
+        var existing = await repository.FindProjectByNameForEmployeeAsync(identity.Value!.InstituteId,
+            identity.Value.EmployeeId, identity.Value.UserId, command.Inception.Name.Trim(), ct);
         if (existing is not null)
         {
             var existingInception = await repository.FindProjectInceptionAsync(existing.Id, ct);
-            return Result<StaffQuarterlyCatalogOption>.Success(new(existing.Id, existing.Code, existing.Name,
-                existing.Status, existingInception?.IsComplete ?? false, true));
+            return Result<StaffQuarterlyCatalogOption>.Success(MapCatalogOption(existing,
+                existingInception?.IsComplete ?? false, existing.Pin, true));
         }
 
         return await CreateInceptionProjectAsync(identity.Value, command.Inception, ct);
@@ -363,7 +466,8 @@ public sealed class StaffQuarterlyReportService(
 
         var draftUpdated = inception.UpdateDraft(command.EstimatedDuration.Trim(), command.SponsorName.Trim(),
             command.Location.Trim(), command.CollaboratingInstitute, command.ParticipatingScientists,
-            command.ExpectedBeneficiaries, command.PotentialTechnology, command.ContributionToKnowledge);
+            command.ExpectedBeneficiaries, command.PotentialTechnology, command.Commercialization,
+            command.ContributionToKnowledge);
         if (draftUpdated.IsFailure)
             return Result<StaffQuarterlyProjectInceptionResponse>.Failure(draftUpdated.Error!);
 
@@ -673,7 +777,8 @@ public sealed class StaffQuarterlyReportService(
         }
 
         var currency = command.Currency.Trim().ToUpperInvariant();
-        var project = Project.Create(identity.InstituteId, command.Code.Trim(), command.Name.Trim(),
+        var project = Project.Create(identity.InstituteId, StaffQuarterlyReportSupport.GenerateProjectCode(),
+            command.Name.Trim(),
             command.Objective.Trim(), command.Justification.Trim(), command.Method.Trim(), null, command.Nature,
             command.StartDate, command.EndDate, currency, command.BudgetAmount, null, null,
             command.LeadEmployeeId, null);
@@ -682,7 +787,8 @@ public sealed class StaffQuarterlyReportService(
         repository.Add(inception);
         var draftUpdated = inception.UpdateDraft(command.EstimatedDuration.Trim(), command.SponsorName.Trim(),
             command.Location.Trim(), command.CollaboratingInstitute, command.ParticipatingScientists,
-            command.ExpectedBeneficiaries, command.PotentialTechnology, command.ContributionToKnowledge);
+            command.ExpectedBeneficiaries, command.PotentialTechnology, command.Commercialization,
+            command.ContributionToKnowledge);
         if (draftUpdated.IsFailure)
             return Result<StaffQuarterlyCatalogOption>.Failure(draftUpdated.Error!);
 
@@ -696,8 +802,7 @@ public sealed class StaffQuarterlyReportService(
         await audit.RecordAsync("staff-quarterly-report.project-draft-created", "Project", project.Id.ToString(), null,
             $"code={project.Code};complete={command.CompleteInception}", ct);
         await unitOfWork.SaveChangesAsync(ct);
-        return Result<StaffQuarterlyCatalogOption>.Success(new(project.Id, project.Code, project.Name, project.Status,
-            inception.IsComplete));
+        return Result<StaffQuarterlyCatalogOption>.Success(MapCatalogOption(project, inception.IsComplete, project.Pin));
     }
 
     private async Task<Result<StaffQuarterlyUploadSessionResponse>> CreateUploadSessionAsync(
@@ -751,13 +856,17 @@ public sealed class StaffQuarterlyReportService(
         if (period is null) fields["reportingPeriodId"] = ["Select an open quarterly reporting period."];
         var reviewer = await repository.FindEligibleReviewerAsync(employeeId, instituteId, command.ReviewerUserId, ct);
         if (reviewer is null)
-            fields["reviewerUserId"] = ["Select a reviewer from your HOD list or search for another staff member in your institute."];
+            fields["reviewerUserId"] = ["Select a Head of Division, Scientific Secretary, or another eligible reviewer in your institute."];
 
         var projectIds = command.ProjectIds.Distinct().ToList();
         var technologyIds = command.TechnologyIds.Distinct().ToList();
+        var ownedProjects = await repository.ListEmployeeProjectOptionsAsync(
+            instituteId, employeeId, currentUser.UserId ?? Guid.Empty, ct);
+        var ownedProjectIds = ownedProjects.Select(item => item.Id).ToHashSet();
         var projects = await repository.FindProjectsAsync(instituteId, projectIds, ct);
         var technologies = await repository.FindTechnologiesAsync(instituteId, technologyIds, ct);
-        if (projects.Count != projectIds.Count) fields["projectIds"] = ["One or more selected projects are unavailable."];
+        if (projects.Count != projectIds.Count || projectIds.Any(id => !ownedProjectIds.Contains(id)))
+            fields["projectIds"] = ["One or more selected projects are unavailable."];
         if (technologies.Count != technologyIds.Count) fields["technologyIds"] = ["One or more selected technologies are unavailable."];
 
         if (command.ProjectProgress.GroupBy(item => item.ProjectId).Any(group => group.Count() > 1))
@@ -778,9 +887,15 @@ public sealed class StaffQuarterlyReportService(
         {
             if (!inceptions.TryGetValue(projectId, out var inception) || !inception.IsComplete)
                 fields["projectProgress"] = ["Complete Form 1 for every selected project before recording progress."];
-            else if (progressByProject.TryGetValue(projectId, out var progress) &&
-                     string.IsNullOrWhiteSpace(progress.ProgressSummary))
-                fields["projectProgress"] = ["Summarize progress for every selected project."];
+            else if (progressByProject.TryGetValue(projectId, out var progress))
+            {
+                if (string.IsNullOrWhiteSpace(progress.ProgressSummary))
+                    fields["projectProgress"] = ["Summarize progress for every selected project."];
+                else if (string.IsNullOrWhiteSpace(progress.ProgressKeyResults))
+                    fields["projectProgress"] = ["Record key results for every selected project."];
+                else if (string.IsNullOrWhiteSpace(progress.WayForward))
+                    fields["projectProgress"] = ["Record the way forward for every selected project."];
+            }
         }
 
         if (period is not null && await repository.StaffReportExistsAsync(employeeId, period.Id, excludeId, ct))
@@ -878,7 +993,9 @@ public sealed class StaffQuarterlyReportService(
             if (inception is not null)
             {
                 conceptNoteFiles.TryGetValue(inception.ConceptNoteFileId ?? Guid.Empty, out var conceptFile);
-                inceptionResponse = link.ProjectCodeSnapshot is not null
+                var useSnapshot = link.ProjectCodeSnapshot is not null &&
+                    value.Report.Status is not ReportStatuses.Draft and not ReportStatuses.Returned;
+                inceptionResponse = useSnapshot
                     ? MapSnapshotInception(project, inception, link, conceptFile)
                     : MapInception(project, inception, leadNames, conceptFile);
             }
@@ -926,14 +1043,16 @@ public sealed class StaffQuarterlyReportService(
         FileRecord? conceptFile = null;
         if (inception?.ConceptNoteFileId is Guid fileId)
             conceptFile = (await repository.FindFileRecordsAsync([fileId], ct)).SingleOrDefault();
-        return MapInception(project, inception, leadNames, conceptFile);
+        var institute = await repository.FindInstituteAsync(project.InstituteId, ct);
+        return MapInception(project, inception, leadNames, conceptFile, institute?.Name);
     }
 
     private static StaffQuarterlyProjectInceptionResponse MapInception(
         Project project,
         ProjectInception? inception,
         IReadOnlyDictionary<Guid, string> leadNames,
-        FileRecord? conceptFile) =>
+        FileRecord? conceptFile,
+        string? instituteName = null) =>
         new(
             project.Id,
             project.Code,
@@ -955,9 +1074,15 @@ public sealed class StaffQuarterlyReportService(
             inception?.ParticipatingScientists,
             inception?.ExpectedBeneficiaries,
             inception?.PotentialTechnology,
+            inception?.Commercialization,
             inception?.ContributionToKnowledge,
+            project.Pin,
+            StaffQuarterlyReportSupport.ResolvePinStatus(project.Pin),
+            project.PinAssignedAt,
+            instituteName,
             inception?.IsComplete ?? false,
-            conceptFile is null ? null : StaffQuarterlyReportSupport.MapFile(conceptFile));
+            conceptFile is null ? null : StaffQuarterlyReportSupport.MapFile(conceptFile),
+            ConcurrencyToken.Format(project.RowVersion));
 
     private static StaffQuarterlyProjectInceptionResponse MapSnapshotInception(
         Project project,
@@ -985,9 +1110,15 @@ public sealed class StaffQuarterlyReportService(
             link.SnapshotParticipatingScientists,
             link.SnapshotExpectedBeneficiaries,
             link.SnapshotPotentialTechnology,
+            link.SnapshotCommercialization,
             link.SnapshotContributionToKnowledge,
+            link.SnapshotPin,
+            StaffQuarterlyReportSupport.ResolvePinStatus(link.SnapshotPin),
+            project.PinAssignedAt,
+            null,
             true,
-            conceptFile is null ? null : StaffQuarterlyReportSupport.MapFile(conceptFile));
+            conceptFile is null ? null : StaffQuarterlyReportSupport.MapFile(conceptFile),
+            ConcurrencyToken.Format(project.RowVersion));
 
     private async Task<IReadOnlyDictionary<Guid, string>> LoadLeadNamesAsync(
         IReadOnlyList<Project> projects, CancellationToken ct)
@@ -1014,6 +1145,62 @@ public sealed class StaffQuarterlyReportService(
         if (!currentUser.UserId.HasValue || !currentUser.InstituteId.HasValue)
             return Result<(Guid, Guid)>.Failure(Error.NotFound("Reviewer identity link not found."));
         return Result<(Guid, Guid)>.Success((currentUser.UserId.Value, currentUser.InstituteId.Value));
+    }
+
+    private Result<(Guid UserId, Guid InstituteId)> RequireScientificSecretaryIdentity()
+    {
+        if (!currentUser.UserId.HasValue || !currentUser.InstituteId.HasValue)
+            return Result<(Guid, Guid)>.Failure(Error.NotFound("Scientific Secretary identity link not found."));
+        if (!currentUser.HasPermission(SpmePermissions.ReportsReview))
+            return Result<(Guid, Guid)>.Failure(Error.Forbidden("Report review permission is required."));
+        if (!currentUser.IsInRole("ScientificSecretary"))
+            return Result<(Guid, Guid)>.Failure(Error.Forbidden("Scientific Secretary access is required."));
+        return Result<(Guid, Guid)>.Success((currentUser.UserId.Value, currentUser.InstituteId.Value));
+    }
+
+    private static StaffQuarterlyCatalogOption MapCatalogOption(
+        Project project, bool hasInception, string? pin, bool alreadyExisted = false) =>
+        new(project.Id, project.Code, project.Name, project.Status, hasInception, alreadyExisted, pin,
+            StaffQuarterlyReportSupport.ResolvePinStatus(pin));
+
+    private static StaffQuarterlyCollationEntry MapCollationEntry(StaffQuarterlyReportAggregate aggregate)
+    {
+        var projects = aggregate.Projects.Select(project =>
+        {
+            var link = aggregate.ReportProjects.Single(candidate => candidate.ProjectId == project.Id);
+            return new StaffQuarterlyCollationProjectRow(
+                project.Id,
+                link.ProjectCodeSnapshot ?? project.Code,
+                link.ProjectNameSnapshot ?? project.Name,
+                link.SnapshotPin ?? project.Pin,
+                StaffQuarterlyReportSupport.ResolvePinStatus(link.SnapshotPin ?? project.Pin),
+                link.ProgressSummary,
+                link.ProgressKeyResults,
+                link.Challenges,
+                link.NextQuarterActivities,
+                link.WayForward,
+                link.ConferencePapersProduced,
+                link.IpTechnologiesProtected);
+        }).ToList();
+
+        return new StaffQuarterlyCollationEntry(
+            aggregate.Report.Id,
+            new StaffQuarterlyReportPeriod(
+                aggregate.Period.Id,
+                aggregate.Period.Code,
+                aggregate.Period.Name,
+                aggregate.Period.StartDate,
+                aggregate.Period.EndDate,
+                aggregate.Period.DueDate),
+            new StaffQuarterlyReportOwner(
+                aggregate.Owner.Id,
+                aggregate.Owner.StaffId,
+                DisplayName(aggregate.Owner)),
+            aggregate.Report.Title,
+            aggregate.Report.Status,
+            aggregate.Report.SubmittedAt,
+            aggregate.Report.ApprovedAt,
+            projects);
     }
 
     private bool CanRead(StaffQuarterlyReportAggregate? aggregate) => aggregate is not null &&

@@ -202,12 +202,12 @@ public static class AuthenticationConfiguration
             .AddPolicy(AuthorizationPolicies.ReviewStaffReports, policy =>
                 policy.RequireAssertion(ctx => HasPermissionOrRole(
                     ctx, SpmePermissions.ReportsReview,
-                    SpmeRoles.HeadOfSection, SpmeRoles.HeadOfDivision)))
+                    SpmeRoles.HeadOfSection, SpmeRoles.HeadOfDivision, SpmeRoles.ScientificSecretary)))
             .AddPolicy(AuthorizationPolicies.ReadStaffQuarterlyReports, policy =>
                 policy.RequireAssertion(ctx =>
                     HasPermissionOrRole(ctx, SpmePermissions.ReportsSelf, SpmeRoles.Employee) ||
                     HasPermissionOrRole(ctx, SpmePermissions.ReportsReview,
-                        SpmeRoles.HeadOfSection, SpmeRoles.HeadOfDivision)))
+                        SpmeRoles.HeadOfSection, SpmeRoles.HeadOfDivision, SpmeRoles.ScientificSecretary)))
             .AddPolicy(AuthorizationPolicies.ReadOrganization, policy =>
                 policy.RequireAssertion(ctx =>
                     HasPermissionOrRole(

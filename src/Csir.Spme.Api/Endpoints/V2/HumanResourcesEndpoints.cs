@@ -3,7 +3,10 @@ using Csir.Spme.Application.Common.Interfaces;
 using Csir.Spme.Domain.Common;
 using Csir.Spme.Domain.Constants;
 using Csir.Spme.Domain.Hr;
+using Csir.Spme.Domain.Iam;
+using Csir.Spme.Infrastructure.Identity;
 using Csir.Spme.Infrastructure.Persistence;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Mvc;
 
@@ -491,6 +494,7 @@ internal static class HumanResourcesEndpoints
     private static async Task<Results<Created<EmployeeDetailResponse>, ProblemHttpResult>> CreateEmployeeAsync(
         UpsertEmployeeRequest request,
         SpmeDbContext db,
+        UserManager<User> userManager,
         HttpContext context,
         IAuditService audit,
         CancellationToken cancellationToken)
@@ -521,6 +525,8 @@ internal static class HumanResourcesEndpoints
         db.EmploymentRecords.Add(CreateEmploymentRecord(employee.Id, instituteId, request));
         await db.SaveChangesAsync(cancellationToken);
         await audit.RecordAndSaveAsync("employees.create", "Employee", employee.Id.ToString(), after: employee.StaffId, ct: cancellationToken);
+        await EmployeeLeadershipIdentitySync.SyncScientificSecretaryRoleAsync(
+            userManager, audit, employee.Id, request.LeadershipRoles, cancellationToken);
 
         var response = await GetEmployeeDetailResponseAsync(employee.Id, db, context, cancellationToken)
             ?? throw new InvalidOperationException("Created employee could not be loaded.");
@@ -532,6 +538,7 @@ internal static class HumanResourcesEndpoints
         Guid id,
         UpsertEmployeeRequest request,
         SpmeDbContext db,
+        UserManager<User> userManager,
         HttpContext context,
         IAuditService audit,
         CancellationToken cancellationToken)
@@ -596,6 +603,8 @@ internal static class HumanResourcesEndpoints
 
         await db.SaveChangesAsync(cancellationToken);
         await audit.RecordAndSaveAsync("employees.update", "Employee", employee.Id.ToString(), before, employee.StaffId, cancellationToken);
+        await EmployeeLeadershipIdentitySync.SyncScientificSecretaryRoleAsync(
+            userManager, audit, employee.Id, request.LeadershipRoles, cancellationToken);
 
         var response = await GetEmployeeDetailResponseAsync(employee.Id, db, context, cancellationToken)
             ?? throw new InvalidOperationException("Updated employee could not be loaded.");

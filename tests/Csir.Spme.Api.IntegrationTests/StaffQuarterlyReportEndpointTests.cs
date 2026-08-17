@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Text;
 using Csir.Spme.Api.Auth;
 using Csir.Spme.Api.Endpoints.V2;
+using Csir.Spme.Application.Common;
 using Csir.Spme.Application.Reporting;
 using Csir.Spme.Domain.Common;
 using Csir.Spme.Domain.Constants;
@@ -113,7 +114,7 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
             seed.EmployeeId, SpmePermissions.ReportsSelf);
 
         var created = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports/project-drafts",
-            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest($"DRAFT-{Guid.NewGuid():N}"[..16],
+            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest(
                 "Coastal sediment survey", seed.ReviewerEmployeeId, complete: true)));
         created.StatusCode.Should().Be(HttpStatusCode.Created, await created.Content.ReadAsStringAsync());
         var option = (await created.Content.ReadFromJsonAsync<DataResponse<StaffQuarterlyCatalogOption>>())!.Data;
@@ -189,7 +190,7 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
         duplicatePeriod.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
 
         var existingProject = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports/project-drafts",
-            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest("WATER-EXISTING",
+            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest(
                 "Water quality project", seed.EmployeeId, complete: true)));
         existingProject.StatusCode.Should().Be(HttpStatusCode.OK);
         var existing = (await existingProject.Content.ReadFromJsonAsync<DataResponse<StaffQuarterlyCatalogOption>>())!.Data;
@@ -395,13 +396,13 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
         using var locked = new HttpRequestMessage(HttpMethod.Put,
             $"/api/v2/staff-quarterly-reports/projects/{seed.ProjectId}/inception")
         {
-            Content = JsonContent.Create(FormOneRequest("WATER-EXISTING", "Water quality project",
+            Content = JsonContent.Create(FormOneRequest("Water quality project",
                 seed.EmployeeId, complete: true))
         };
         (await employee.SendAsync(locked)).StatusCode.Should().Be(HttpStatusCode.Conflict);
 
         var incomplete = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports/project-drafts",
-            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest($"THIN-{Guid.NewGuid():N}"[..12],
+            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest(
                 "Thin project draft", seed.EmployeeId, complete: false)));
         incomplete.StatusCode.Should().Be(HttpStatusCode.Created);
         var thinProject = (await incomplete.Content.ReadFromJsonAsync<DataResponse<StaffQuarterlyCatalogOption>>())!.Data;
@@ -468,7 +469,7 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
         using var employee = Client(seed.EmployeeUserId, SpmeRoles.Employee, seed.InstituteId,
             seed.EmployeeId, SpmePermissions.ReportsSelf);
         var incomplete = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports/project-drafts",
-            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest($"NOTE-{Guid.NewGuid():N}"[..12],
+            new CreateStaffQuarterlyProjectDraftRequest(FormOneRequest(
                 "Concept note project", seed.EmployeeId, complete: false)));
         var noteProject = (await incomplete.Content.ReadFromJsonAsync<DataResponse<StaffQuarterlyCatalogOption>>())!.Data;
         var created = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports",
@@ -660,6 +661,141 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
         options.Data.Reviewers.Should().NotContain(item => item.UserId == seed.ReviewerUserId);
     }
 
+    [Fact]
+    public async Task Scientific_Secretary_Assigns_Pin_And_Draft_Shows_Live_Pin()
+    {
+        var seed = await SeedAsync();
+        var ssUserId = Guid.NewGuid();
+        var ssEmployeeId = Guid.NewGuid();
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+            var ssEmployee = new Employee(seed.InstituteId, $"SS-{Guid.NewGuid():N}"[..16], "Secretary", "unspecified");
+            ssEmployee.UpdateImportedProfile(null, "Sam", null, null, null, null,
+                $"ss.{Guid.NewGuid():N}@example.test", "+233200000099", true);
+            var ssUser = new User($"ss.{Guid.NewGuid():N}", SpmeRoles.ScientificSecretary)
+            {
+                Email = ssEmployee.PrimaryEmail,
+                PhoneNumber = ssEmployee.Phone,
+                EmailConfirmed = true,
+                PhoneNumberConfirmed = true
+            };
+            ssUser.LinkEmployee(ssEmployee.Id, seed.InstituteId);
+            var role = await db.Roles.SingleOrDefaultAsync(item => item.Name == SpmeRoles.ScientificSecretary) ??
+                new Role("scientific-secretary", SpmeRoles.ScientificSecretary, "Scientific Secretary", true);
+            if (db.Entry(role).State == EntityState.Detached) db.Roles.Add(role);
+            db.Employees.Add(ssEmployee);
+            db.Users.Add(ssUser);
+            db.UserRoles.Add(new IdentityUserRole<Guid> { UserId = ssUser.Id, RoleId = role.Id });
+            db.EmploymentRecords.Add(new EmploymentRecord(ssEmployee.Id, seed.InstituteId, null, null, null,
+                "Scientific Secretary", null, "senior-staff", "active", null, null, null, null, null,
+                new DateTime(2020, 1, 1), true));
+            await db.SaveChangesAsync();
+            ssUserId = ssUser.Id;
+            ssEmployeeId = ssEmployee.Id;
+        }
+
+        using var employee = Client(seed.EmployeeUserId, SpmeRoles.Employee, seed.InstituteId,
+            seed.EmployeeId, SpmePermissions.ReportsSelf);
+        var beforePin = await employee.GetFromJsonAsync<DataResponse<StaffQuarterlyProjectInceptionResponse>>(
+            $"/api/v2/staff-quarterly-reports/projects/{seed.ProjectId}");
+        beforePin!.Data.PinStatus.Should().Be("pending");
+        beforePin.Data.Pin.Should().BeNull();
+
+        using var ss = Client(ssUserId, SpmeRoles.ScientificSecretary, seed.InstituteId,
+            ssEmployeeId, SpmePermissions.ReportsReview);
+        var project = await ss.GetFromJsonAsync<DataResponse<StaffQuarterlyProjectInceptionResponse>>(
+            $"/api/v2/staff-quarterly-reports/projects/{seed.ProjectId}");
+        project!.Data.PinStatus.Should().Be("pending");
+
+        byte[] rowVersion;
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+            rowVersion = (await db.Projects.AsNoTracking().SingleAsync(item => item.Id == seed.ProjectId)).RowVersion;
+        }
+
+        using var assign = new HttpRequestMessage(HttpMethod.Put,
+            $"/api/v2/staff-quarterly-reports/projects/{seed.ProjectId}/pin")
+        {
+            Content = JsonContent.Create(new AssignProjectPinRequest("CSIR-PIN-001"))
+        };
+        assign.Headers.TryAddWithoutValidation("If-Match", ConcurrencyToken.Format(rowVersion));
+        var assigned = await ss.SendAsync(assign);
+        assigned.StatusCode.Should().Be(HttpStatusCode.OK, await assigned.Content.ReadAsStringAsync());
+
+        var afterPin = await employee.GetFromJsonAsync<DataResponse<StaffQuarterlyProjectInceptionResponse>>(
+            $"/api/v2/staff-quarterly-reports/projects/{seed.ProjectId}");
+        afterPin!.Data.Pin.Should().Be("CSIR-PIN-001");
+        afterPin.Data.PinStatus.Should().Be("assigned");
+
+        var created = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports",
+            ReportRequest(seed.PeriodId, seed.ReviewerUserId, "PIN pending submit",
+                null, "Work summary for PIN pending submit.", null, null, [seed.ProjectId], []));
+        created.StatusCode.Should().Be(HttpStatusCode.Created);
+        using var submit = new HttpRequestMessage(HttpMethod.Post,
+            $"/api/v2/staff-quarterly-reports/{(await created.Content.ReadFromJsonAsync<DataResponse<StaffQuarterlyReportResponse>>())!.Data.Id}/submit");
+        submit.Headers.IfMatch.Add(created.Headers.ETag!);
+        submit.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        (await employee.SendAsync(submit)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task Scientific_Secretary_Collation_Returns_Submitted_Reports_For_Institute_Quarter()
+    {
+        var seed = await SeedAsync();
+        var ssUserId = Guid.NewGuid();
+        var ssEmployeeId = Guid.NewGuid();
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+            var ssEmployee = new Employee(seed.InstituteId, $"SSC-{Guid.NewGuid():N}"[..16], "Secretary", "unspecified");
+            ssEmployee.UpdateImportedProfile(null, "Collation", null, null, null, null,
+                $"ssc.{Guid.NewGuid():N}@example.test", "+233200000088", true);
+            var ssUser = new User($"ssc.{Guid.NewGuid():N}", SpmeRoles.ScientificSecretary)
+            {
+                Email = ssEmployee.PrimaryEmail,
+                PhoneNumber = ssEmployee.Phone,
+                EmailConfirmed = true,
+                PhoneNumberConfirmed = true
+            };
+            ssUser.LinkEmployee(ssEmployee.Id, seed.InstituteId);
+            var role = await db.Roles.SingleOrDefaultAsync(item => item.Name == SpmeRoles.ScientificSecretary) ??
+                new Role("scientific-secretary", SpmeRoles.ScientificSecretary, "Scientific Secretary", true);
+            if (db.Entry(role).State == EntityState.Detached) db.Roles.Add(role);
+            db.Employees.Add(ssEmployee);
+            db.Users.Add(ssUser);
+            db.UserRoles.Add(new IdentityUserRole<Guid> { UserId = ssUser.Id, RoleId = role.Id });
+            await db.SaveChangesAsync();
+            ssUserId = ssUser.Id;
+            ssEmployeeId = ssEmployee.Id;
+        }
+
+        using var employee = Client(seed.EmployeeUserId, SpmeRoles.Employee, seed.InstituteId,
+            seed.EmployeeId, SpmePermissions.ReportsSelf);
+        var created = await PostJsonAsync(employee, "/api/v2/staff-quarterly-reports",
+            ReportRequest(seed.PeriodId, seed.ReviewerUserId, "Collation coverage report",
+                null, "Work summary for collation.", null, null, [seed.ProjectId], []));
+        created.StatusCode.Should().Be(HttpStatusCode.Created);
+        var report = (await created.Content.ReadFromJsonAsync<DataResponse<StaffQuarterlyReportResponse>>())!.Data;
+        using var submit = new HttpRequestMessage(HttpMethod.Post, $"/api/v2/staff-quarterly-reports/{report.Id}/submit");
+        submit.Headers.IfMatch.Add(created.Headers.ETag!);
+        submit.Headers.Add("Idempotency-Key", Guid.NewGuid().ToString("N"));
+        (await employee.SendAsync(submit)).StatusCode.Should().Be(HttpStatusCode.OK);
+
+        using var ss = Client(ssUserId, SpmeRoles.ScientificSecretary, seed.InstituteId,
+            ssEmployeeId, SpmePermissions.ReportsReview);
+        var collation = await ss.GetFromJsonAsync<ListResponse<StaffQuarterlyCollationEntry>>(
+            $"/api/v2/staff-quarterly-reports/collation?reportingPeriodId={seed.PeriodId}");
+        collation!.Data.Should().ContainSingle(item => item.ReportId == report.Id && item.Status == ReportStatuses.Submitted);
+        collation.Data[0].Projects.Should().ContainSingle(item => item.ProjectId == seed.ProjectId);
+
+        using var hod = Client(seed.ReviewerUserId, SpmeRoles.HeadOfSection, seed.InstituteId,
+            seed.ReviewerEmployeeId, SpmePermissions.ReportsReview);
+        (await hod.GetAsync($"/api/v2/staff-quarterly-reports/collation?reportingPeriodId={seed.PeriodId}"))
+            .StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
     private async Task<Seed> SeedAsync()
     {
         await using var scope = _factory.Services.CreateAsyncScope();
@@ -715,7 +851,8 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
             null, ProjectNatures.Research, new DateTime(2026, 1, 1), null, "GHS", 1000m,
             null, null, employee.Id, null);
         var inception = ProjectInception.Create(project.Id);
-        inception.UpdateDraft("1 year", "CSIR Internal Fund", "Accra", null, null, null, null, null);
+        inception.UpdateDraft("1 year", "CSIR Internal Fund", "Accra", null, null,
+            "Local communities", "Water quality sensors", "Licensing to utilities", "Methodology advances");
         inception.Complete(DateTimeOffset.UtcNow);
         db.ReportingPeriods.Add(period);
         db.Projects.Add(project);
@@ -769,12 +906,12 @@ public sealed class StaffQuarterlyReportEndpointTests : IClassFixture<SpmeApiFac
     }
 
     private static SaveStaffQuarterlyProjectInceptionRequest FormOneRequest(
-        string code, string name, Guid leadEmployeeId, bool complete) => new(
-        code, name, "Map coastal sediment transport", "Background and justification for coastal sediment mapping.",
+        string name, Guid leadEmployeeId, bool complete) => new(
+        name, "Map coastal sediment transport", "Background and justification for coastal sediment mapping.",
         "Remote sensing with ground-truth samples.", ProjectNatures.Research, new DateTime(2026, 2, 1),
         new DateTime(2026, 11, 30), 250000.50m, "USD", leadEmployeeId, "11 months", "CSIR Internal Fund",
         "Accra", null, "Kenneth Asiamah", "Communities near the coast", "Coastal monitoring platform",
-        "Policy guidance for sediment management", complete);
+        "Technology licensing pathway", "Policy guidance for sediment management", complete);
 
     private static async Task<HttpResponseMessage> PostJsonAsync(
         HttpClient client, string path, object body, string? idempotencyKey = null)

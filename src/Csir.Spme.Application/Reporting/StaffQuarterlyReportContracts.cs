@@ -4,7 +4,23 @@ public sealed record StaffQuarterlyPeriodOption(
     Guid Id, string Code, string Name, DateTime StartDate, DateTime EndDate, DateTime? DueDate);
 
 public sealed record StaffQuarterlyCatalogOption(
-    Guid Id, string Code, string Name, string Status, bool HasInception = false, bool AlreadyExisted = false);
+    Guid Id,
+    string Code,
+    string Name,
+    string Status,
+    bool HasInception = false,
+    bool AlreadyExisted = false,
+    string? Pin = null,
+    string PinStatus = "pending");
+
+public sealed record StaffQuarterlyFormOneSummary(
+    Guid Id,
+    string Name,
+    bool HasInception,
+    bool IsComplete,
+    string? Pin,
+    string PinStatus,
+    DateTimeOffset? PinAssignedAt);
 
 public sealed record StaffQuarterlyReviewerOption(
     Guid UserId, Guid EmployeeId, string DisplayName, string Role, string Email, string Phone);
@@ -49,9 +65,15 @@ public sealed record StaffQuarterlyProjectInceptionResponse(
     string? ParticipatingScientists,
     string? ExpectedBeneficiaries,
     string? PotentialTechnology,
+    string? Commercialization,
     string? ContributionToKnowledge,
+    string? Pin,
+    string PinStatus,
+    DateTimeOffset? PinAssignedAt,
+    string? InstituteName,
     bool HasInception,
-    StaffQuarterlyFileMetadata? ConceptNote);
+    StaffQuarterlyFileMetadata? ConceptNote,
+    string Etag);
 
 public sealed record StaffQuarterlyProjectProgressResponse(
     Guid ProjectId,
@@ -112,8 +134,33 @@ public sealed record SaveStaffQuarterlyReportCommand(
     IReadOnlyList<Guid> TechnologyIds,
     IReadOnlyList<SaveStaffQuarterlyProjectProgressCommand> ProjectProgress);
 
-public sealed record SaveStaffQuarterlyProjectInceptionCommand(
+public sealed record AssignProjectPinCommand(string Pin);
+
+public sealed record StaffQuarterlyCollationProjectRow(
+    Guid ProjectId,
     string Code,
+    string Name,
+    string? Pin,
+    string PinStatus,
+    string? ProgressSummary,
+    string? ProgressKeyResults,
+    string? Challenges,
+    string? NextQuarterActivities,
+    string? WayForward,
+    int ConferencePapersProduced,
+    int IpTechnologiesProtected);
+
+public sealed record StaffQuarterlyCollationEntry(
+    Guid ReportId,
+    StaffQuarterlyReportPeriod ReportingPeriod,
+    StaffQuarterlyReportOwner Owner,
+    string Title,
+    string Status,
+    DateTimeOffset? SubmittedAt,
+    DateTimeOffset? ApprovedAt,
+    IReadOnlyList<StaffQuarterlyCollationProjectRow> Projects);
+
+public sealed record SaveStaffQuarterlyProjectInceptionCommand(
     string Name,
     string Objective,
     string Justification,
@@ -131,6 +178,7 @@ public sealed record SaveStaffQuarterlyProjectInceptionCommand(
     string? ParticipatingScientists,
     string? ExpectedBeneficiaries,
     string? PotentialTechnology,
+    string? Commercialization,
     string? ContributionToKnowledge,
     bool CompleteInception);
 

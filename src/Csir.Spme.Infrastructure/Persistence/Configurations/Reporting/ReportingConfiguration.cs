@@ -81,7 +81,9 @@ public sealed class ReportProjectConfiguration : IEntityTypeConfiguration<Report
         builder.Property(x => x.SnapshotJustification).HasMaxLength(4000);
         builder.Property(x => x.SnapshotExpectedBeneficiaries).HasMaxLength(4000);
         builder.Property(x => x.SnapshotPotentialTechnology).HasMaxLength(4000);
+        builder.Property(x => x.SnapshotCommercialization).HasMaxLength(4000);
         builder.Property(x => x.SnapshotContributionToKnowledge).HasMaxLength(4000);
+        builder.Property(x => x.SnapshotPin).HasMaxLength(64);
         builder.HasOne<Report>().WithMany().HasForeignKey(x => x.ReportId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Csir.Spme.Domain.Projects.Project>().WithMany()
             .HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);

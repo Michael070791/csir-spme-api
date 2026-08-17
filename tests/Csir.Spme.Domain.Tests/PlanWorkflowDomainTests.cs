@@ -16,10 +16,10 @@ public sealed class PlanWorkflowDomainTests
         var inception = ProjectInception.Create(Guid.NewGuid());
 
         inception.Complete(DateTimeOffset.UtcNow).IsFailure.Should().BeTrue();
-        inception.UpdateDraft("12 months", "CSIR", "Accra", null, null, null, null, null)
+        inception.UpdateDraft("12 months", "CSIR", "Accra", null, null, "Beneficiaries", "Technology", "Commercialization", "Contribution")
             .IsSuccess.Should().BeTrue();
         inception.Complete(DateTimeOffset.UtcNow).IsSuccess.Should().BeTrue();
-        inception.UpdateDraft("24 months", "Other", "Kumasi", null, null, null, null, null)
+        inception.UpdateDraft("24 months", "Other", "Kumasi", null, null, "Beneficiaries", "Technology", "Commercialization", "Contribution")
             .IsFailure.Should().BeTrue();
     }
 

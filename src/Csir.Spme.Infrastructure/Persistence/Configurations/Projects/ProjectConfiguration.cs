@@ -10,6 +10,8 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.ToTable("Projects", "projects");
         builder.HasKey(x => x.Id);
         builder.Property(x => x.Code).HasMaxLength(64).IsRequired();
+        builder.Property(x => x.Pin).HasMaxLength(64);
+        builder.Property(x => x.PinAssignedAt);
         builder.Property(x => x.Name).HasMaxLength(256).IsRequired();
         builder.Property(x => x.Objective).HasMaxLength(4000).IsRequired();
         builder.Property(x => x.Justification).HasMaxLength(4000);
@@ -23,6 +25,9 @@ public class ProjectConfiguration : IEntityTypeConfiguration<Project>
         builder.Property(x => x.Innovation).HasMaxLength(4000);
         builder.Property(x => x.Impact).HasMaxLength(4000);
         builder.HasIndex(x => new { x.InstituteId, x.Code }).IsUnique();
+        builder.HasIndex(x => new { x.InstituteId, x.Pin })
+            .IsUnique()
+            .HasFilter("[Pin] IS NOT NULL");
         builder.HasIndex(x => x.LeadEmployeeId);
     }
 }
@@ -93,6 +98,7 @@ public sealed class ProjectInceptionConfiguration : IEntityTypeConfiguration<Pro
         builder.Property(x => x.ParticipatingScientists);
         builder.Property(x => x.ExpectedBeneficiaries);
         builder.Property(x => x.PotentialTechnology);
+        builder.Property(x => x.Commercialization);
         builder.Property(x => x.ContributionToKnowledge);
         builder.HasOne<Project>().WithMany().HasForeignKey(x => x.ProjectId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne<Csir.Spme.Domain.Common.FileRecord>().WithMany()

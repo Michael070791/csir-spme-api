@@ -12,6 +12,7 @@ public sealed class ProjectInception : BaseEntity
     public string? ParticipatingScientists { get; private set; }
     public string? ExpectedBeneficiaries { get; private set; }
     public string? PotentialTechnology { get; private set; }
+    public string? Commercialization { get; private set; }
     public string? ContributionToKnowledge { get; private set; }
     public Guid? ConceptNoteFileId { get; private set; }
     public DateTimeOffset? InceptionCompletedAt { get; private set; }
@@ -30,6 +31,7 @@ public sealed class ProjectInception : BaseEntity
         string? participatingScientists,
         string? expectedBeneficiaries,
         string? potentialTechnology,
+        string? commercialization,
         string? contributionToKnowledge)
     {
         if (IsComplete)
@@ -42,6 +44,7 @@ public sealed class ProjectInception : BaseEntity
         ParticipatingScientists = NormalizeOptional(participatingScientists);
         ExpectedBeneficiaries = NormalizeOptional(expectedBeneficiaries);
         PotentialTechnology = NormalizeOptional(potentialTechnology);
+        Commercialization = NormalizeOptional(commercialization);
         ContributionToKnowledge = NormalizeOptional(contributionToKnowledge);
         return Result.Success();
     }
@@ -52,9 +55,13 @@ public sealed class ProjectInception : BaseEntity
             return Result.Failure(Error.StateTransition("Form 1 is already completed."));
         if (string.IsNullOrWhiteSpace(EstimatedDuration) ||
             string.IsNullOrWhiteSpace(SponsorName) ||
-            string.IsNullOrWhiteSpace(Location))
+            string.IsNullOrWhiteSpace(Location) ||
+            string.IsNullOrWhiteSpace(ExpectedBeneficiaries) ||
+            string.IsNullOrWhiteSpace(PotentialTechnology) ||
+            string.IsNullOrWhiteSpace(Commercialization) ||
+            string.IsNullOrWhiteSpace(ContributionToKnowledge))
             return Result.Failure(Error.Validation(
-                "Estimated duration, sponsors, and location are required before Form 1 can be completed."));
+                "Estimated duration, sponsors, location, expected beneficiaries, potential technology, commercialization, and contribution to knowledge are required before Form 1 can be completed."));
 
         InceptionCompletedAt = completedAt;
         return Result.Success();

@@ -33,6 +33,30 @@ internal static class StaffQuarterlyReportEndpoints
             .WithSummary("Search institute staff who can receive a quarterly report.")
             .WithDescription("Searches eligible reviewer candidates in the authenticated employee's institute, excluding the employee. The optional query narrows safe staff results, and an unavailable employee identity is returned without exposing another institute.")
             .Produces<ListResponse<StaffQuarterlyReviewerOption>>();
+        reports.MapGet("/my-form-one-projects", ListMyFormOneProjectsAsync).RequireAuthorization(AuthorizationPolicies.ManageOwnReports)
+            .WithName("StaffQuarterlyReports_ListMyFormOneProjects").WithSummary("List the authenticated employee's Form 1 projects.")
+            .WithDescription("Returns Form 1 projects owned by the authenticated employee, including PIN status and completion state.")
+            .Produces<ListResponse<StaffQuarterlyFormOneSummary>>();
+        reports.MapGet("/form-one-projects", ListInstituteFormOneProjectsAsync)
+            .RequireAuthorization(AuthorizationPolicies.ReviewStaffReports)
+            .WithName("StaffQuarterlyReports_ListInstituteFormOneProjects")
+            .WithSummary("List institute Form 1 projects for Scientific Secretary PIN assignment.")
+            .WithDescription("Returns institute-scoped Form 1 projects for Scientific Secretary PIN assignment within the caller's institute.")
+            .Produces<ListResponse<StaffQuarterlyFormOneSummary>>();
+        reports.MapGet("/collation", ListCollationAsync)
+            .RequireAuthorization(AuthorizationPolicies.ReviewStaffReports)
+            .WithName("StaffQuarterlyReports_ListCollation")
+            .WithSummary("List submitted quarterly reports for institute collation.")
+            .WithDescription("Returns submitted and approved Form 2 quarterly reports for the caller's institute and reporting period. Scientific Secretary access is required; drafts and other institutes are excluded.")
+            .Produces<ListResponse<StaffQuarterlyCollationEntry>>();
+        reports.MapPut("/projects/{projectId:guid}/pin", AssignProjectPinAsync)
+            .RequireAuthorization(AuthorizationPolicies.ReviewStaffReports)
+            .WithName("StaffQuarterlyReports_AssignProjectPin")
+            .WithSummary("Assign or correct a project PIN.")
+            .WithDescription("Assigns or corrects the CSIR PIN on an institute Form 1 project. Scientific Secretary access and the latest If-Match ETag are required.")
+            .Produces<DataResponse<StaffQuarterlyProjectInceptionResponse>>()
+            .ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
         reports.MapGet("/projects/{projectId:guid}", GetProjectInceptionAsync)
             .RequireAuthorization(AuthorizationPolicies.ReadStaffQuarterlyReports)
             .WithName("StaffQuarterlyReports_GetProjectInception")
@@ -144,6 +168,39 @@ internal static class StaffQuarterlyReportEndpoints
         var result = await service.SearchReviewersAsync(q, ct);
         return result.IsFailure ? EndpointProblems.FromError(result.Error!) :
             TypedResults.Ok(ResponseEnvelope.List(context, result.Value!, null));
+    }
+
+    private static async Task<IResult> ListMyFormOneProjectsAsync(
+        StaffQuarterlyReportService service, HttpContext context, CancellationToken ct)
+    {
+        var result = await service.ListMyFormOneProjectsAsync(ct);
+        return result.IsFailure ? EndpointProblems.FromError(result.Error!) :
+            TypedResults.Ok(ResponseEnvelope.List(context, result.Value!, null));
+    }
+
+    private static async Task<IResult> ListInstituteFormOneProjectsAsync(
+        StaffQuarterlyReportService service, HttpContext context, CancellationToken ct)
+    {
+        var result = await service.ListInstituteFormOneProjectsAsync(ct);
+        return result.IsFailure ? EndpointProblems.FromError(result.Error!) :
+            TypedResults.Ok(ResponseEnvelope.List(context, result.Value!, null));
+    }
+
+    private static async Task<IResult> ListCollationAsync(
+        Guid reportingPeriodId, StaffQuarterlyReportService service, HttpContext context, CancellationToken ct)
+    {
+        var result = await service.ListCollationAsync(reportingPeriodId, ct);
+        return result.IsFailure ? EndpointProblems.FromError(result.Error!) :
+            TypedResults.Ok(ResponseEnvelope.List(context, result.Value!, null));
+    }
+
+    private static async Task<IResult> AssignProjectPinAsync(
+        Guid projectId, AssignProjectPinRequest request,
+        StaffQuarterlyReportService service, HttpContext context, CancellationToken ct)
+    {
+        var result = await service.AssignProjectPinAsync(projectId, new(request.Pin), ParseIfMatch(context), ct);
+        return result.IsFailure ? EndpointProblems.FromError(result.Error!) :
+            TypedResults.Ok(ResponseEnvelope.Data(context, result.Value!));
     }
 
     private static async Task<IResult> GetProjectInceptionAsync(
@@ -282,11 +339,11 @@ internal static class StaffQuarterlyReportEndpoints
 
     private static SaveStaffQuarterlyProjectInceptionCommand MapInception(
         SaveStaffQuarterlyProjectInceptionRequest request) => new(
-        request.Code, request.Name, request.Objective, request.Justification, request.Method, request.Nature,
+        request.Name, request.Objective, request.Justification, request.Method, request.Nature,
         request.StartDate, request.EndDate, request.BudgetAmount, request.Currency, request.LeadEmployeeId,
         request.EstimatedDuration, request.SponsorName, request.Location, request.CollaboratingInstitute,
         request.ParticipatingScientists, request.ExpectedBeneficiaries, request.PotentialTechnology,
-        request.ContributionToKnowledge, request.CompleteInception);
+        request.Commercialization, request.ContributionToKnowledge, request.CompleteInception);
 
     private static CreateStaffQuarterlyUploadSessionCommand MapUpload(
         CreateStaffQuarterlyUploadSessionRequest request) => new(
@@ -322,8 +379,10 @@ public sealed record SaveStaffQuarterlyProjectProgressRequest(
 public sealed record CreateStaffQuarterlyProjectDraftRequest(
     [property: Required] SaveStaffQuarterlyProjectInceptionRequest Inception);
 
+public sealed record AssignProjectPinRequest(
+    [property: Required, StringLength(64, MinimumLength = 1)] string Pin);
+
 public sealed record SaveStaffQuarterlyProjectInceptionRequest(
-    [property: Required, StringLength(64)] string Code,
     [property: Required, StringLength(256)] string Name,
     [property: Required, StringLength(4000)] string Objective,
     [property: Required, StringLength(4000)] string Justification,
@@ -341,6 +400,7 @@ public sealed record SaveStaffQuarterlyProjectInceptionRequest(
     [property: StringLength(4000)] string? ParticipatingScientists,
     [property: StringLength(4000)] string? ExpectedBeneficiaries,
     [property: StringLength(4000)] string? PotentialTechnology,
+    [property: StringLength(4000)] string? Commercialization,
     [property: StringLength(4000)] string? ContributionToKnowledge,
     bool CompleteInception);
 

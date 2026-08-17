@@ -1020,6 +1020,7 @@ internal static class IamEndpoints
             leadership.Roles,
             leadership.IsHod,
             leadership.IsDirector,
+            leadership.IsScientificSecretary,
             divisionName,
             sectionName,
             profileCompletion));
@@ -1034,7 +1035,7 @@ internal static class IamEndpoints
 
     private static readonly char[] LeadershipRoleSeparators = [',', ';'];
 
-    private static (IReadOnlyList<string> Roles, bool IsHod, bool IsDirector) ResolvePortalLeadership(
+    private static (IReadOnlyList<string> Roles, bool IsHod, bool IsDirector, bool IsScientificSecretary) ResolvePortalLeadership(
         IList<string> identityRoles,
         string? employmentLeadershipRoles)
     {
@@ -1056,6 +1057,8 @@ internal static class IamEndpoints
         var isDirectorFromIdentity = identityRoles.Any(role =>
             role.Equals("Director", StringComparison.OrdinalIgnoreCase) ||
             role.Equals("InstituteDirector", StringComparison.OrdinalIgnoreCase));
+        var isScientificSecretaryFromIdentity = identityRoles.Any(role =>
+            role.Equals("ScientificSecretary", StringComparison.OrdinalIgnoreCase));
 
         if (isHodFromIdentity && !roles.Any(IsHodLeadershipLabel))
         {
@@ -1068,9 +1071,13 @@ internal static class IamEndpoints
         if (isDirectorFromIdentity && !roles.Any(IsDirectorLeadershipLabel))
             Add("Institute Director");
 
+        if (isScientificSecretaryFromIdentity && !roles.Any(IsScientificSecretaryLeadershipLabel))
+            Add("Scientific Secretary");
+
         var isHod = isHodFromIdentity || roles.Any(IsHodLeadershipLabel);
         var isDirector = isDirectorFromIdentity || roles.Any(IsDirectorLeadershipLabel);
-        return (roles, isHod, isDirector);
+        var isScientificSecretary = isScientificSecretaryFromIdentity || roles.Any(IsScientificSecretaryLeadershipLabel);
+        return (roles, isHod, isDirector, isScientificSecretary);
     }
 
     private static string[] ParseEmploymentLeadershipRoles(string? roles) =>
@@ -1092,6 +1099,7 @@ internal static class IamEndpoints
             "deputy director" or "deputy-director" => "Deputy Director",
             "administrative director" or "admin-director" or "administrative-director" => "Administrative Director",
             "corporate head of administration" or "corporate-head-of-administration" => "Corporate Head of Administration",
+            "scientific secretary" or "scientific-secretary" or "scientificsecretary" => "Scientific Secretary",
             _ => CultureInfo.InvariantCulture.TextInfo.ToTitleCase(normalized.Replace('-', ' ').ToLowerInvariant())
         };
     }
@@ -1108,7 +1116,14 @@ internal static class IamEndpoints
     private static bool IsDirectorLeadershipLabel(string label)
     {
         var value = label.ToLowerInvariant();
-        return value.Contains("director", StringComparison.Ordinal);
+        return value.Contains("director", StringComparison.Ordinal) &&
+               !value.Contains("scientific secretary", StringComparison.Ordinal);
+    }
+
+    private static bool IsScientificSecretaryLeadershipLabel(string label)
+    {
+        var value = label.ToLowerInvariant();
+        return value.Contains("scientific secretary", StringComparison.Ordinal);
     }
 
     private static string BuildPortalDisplayName(User user, Employee? employee)

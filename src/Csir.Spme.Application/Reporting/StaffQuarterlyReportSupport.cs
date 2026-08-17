@@ -66,8 +66,6 @@ internal static partial class StaffQuarterlyReportSupport
     public static Dictionary<string, string[]> ValidateInception(SaveStaffQuarterlyProjectInceptionCommand command)
     {
         var fields = new Dictionary<string, string[]>();
-        if (string.IsNullOrWhiteSpace(command.Code) || command.Code.Length > 64)
-            fields["code"] = ["A code of at most 64 characters is required."];
         if (string.IsNullOrWhiteSpace(command.Name) || command.Name.Length > 256)
             fields["name"] = ["A name of at most 256 characters is required."];
         if (string.IsNullOrWhiteSpace(command.Objective) || command.Objective.Length > 4000)
@@ -101,6 +99,8 @@ internal static partial class StaffQuarterlyReportSupport
             fields["expectedBeneficiaries"] = ["Expected beneficiaries cannot exceed 4000 characters."];
         if (command.PotentialTechnology?.Length > 4000)
             fields["potentialTechnology"] = ["Potential technology cannot exceed 4000 characters."];
+        if (command.Commercialization?.Length > 4000)
+            fields["commercialization"] = ["Commercialization cannot exceed 4000 characters."];
         if (command.ContributionToKnowledge?.Length > 4000)
             fields["contributionToKnowledge"] = ["Contribution to knowledge cannot exceed 4000 characters."];
         return fields;
@@ -114,6 +114,12 @@ internal static partial class StaffQuarterlyReportSupport
 
     public static StaffQuarterlyFileMetadata MapFile(FileRecord file) =>
         new(file.Id, file.OriginalFileName, file.ContentType, file.SizeBytes, file.ScanStatus);
+
+    public static string ResolvePinStatus(string? pin) =>
+        string.IsNullOrWhiteSpace(pin) ? "pending" : "assigned";
+
+    public static string GenerateProjectCode() =>
+        $"F1-{DateTime.UtcNow.Year}-{Guid.NewGuid():N}"[..16];
 
     public static bool IsSha256(string value) => Sha256Regex().IsMatch(value);
 

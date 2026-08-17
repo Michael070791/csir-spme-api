@@ -26,7 +26,8 @@ public sealed class IdentitySeedHostedService : IHostedService
         "HeadOfSection",
         "HeadOfDivision",
         "HeadOfAdmin",
-        "InstituteDirector"
+        "InstituteDirector",
+        "ScientificSecretary"
     ];
 
     private readonly IServiceProvider _serviceProvider;
@@ -189,6 +190,7 @@ public sealed class IdentitySeedHostedService : IHostedService
             ("PlatformAdmin", SpmePermissions.All),
             ("HeadOfSection", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.ReportsReview }),
             ("HeadOfDivision", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.ReportsReview }),
+            ("ScientificSecretary", new[] { SpmePermissions.ReportsReview }),
             ("HeadOfAdmin", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove }),
             ("InstituteDirector", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove })
         })

@@ -13,6 +13,7 @@ public static class SpmeRoles
     public const string HeadOfDivision = "HeadOfDivision";
     public const string HeadOfAdmin = "HeadOfAdmin";
     public const string InstituteDirector = "InstituteDirector";
+    public const string ScientificSecretary = "ScientificSecretary";
 
     public static readonly string[] All =
     [
@@ -26,7 +27,8 @@ public static class SpmeRoles
         HeadOfSection,
         HeadOfDivision,
         HeadOfAdmin,
-        InstituteDirector
+        InstituteDirector,
+        ScientificSecretary
     ];
 }
 

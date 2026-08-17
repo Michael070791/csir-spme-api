@@ -59,6 +59,8 @@ public interface IStaffQuarterlyReportRepository
     Task EnsureOpenCurrentYearQuartersAsync(Guid instituteId, int year, CancellationToken ct);
     Task<IReadOnlyList<ReportingPeriod>> ListOpenQuarterlyPeriodsAsync(Guid instituteId, CancellationToken ct);
     Task<IReadOnlyList<Project>> ListProjectOptionsAsync(Guid instituteId, CancellationToken ct);
+    Task<IReadOnlyList<Project>> ListEmployeeProjectOptionsAsync(Guid instituteId, Guid employeeId, Guid userId, CancellationToken ct);
+    Task<IReadOnlyList<StaffQuarterlyFormOneSummary>> ListInstituteFormOneProjectsAsync(Guid instituteId, CancellationToken ct);
     Task<IReadOnlyList<Technology>> ListTechnologyOptionsAsync(Guid instituteId, CancellationToken ct);
     Task<IReadOnlyList<StaffQuarterlyReviewer>> ListReviewerOptionsAsync(Guid employeeId, Guid instituteId, CancellationToken ct);
     Task<IReadOnlyList<StaffQuarterlyReviewer>> SearchStaffReviewerCandidatesAsync(
@@ -68,11 +70,17 @@ public interface IStaffQuarterlyReportRepository
     Task<StaffQuarterlyReviewer?> FindEligibleReviewerAsync(Guid employeeId, Guid instituteId, Guid reviewerUserId, CancellationToken ct);
     Task<IReadOnlyList<StaffQuarterlyReportAggregate>> ListMineAsync(Guid employeeId, CancellationToken ct);
     Task<IReadOnlyList<StaffQuarterlyReportAggregate>> ListForReviewerAsync(Guid reviewerUserId, Guid instituteId, CancellationToken ct);
+    Task<IReadOnlyList<StaffQuarterlyReportAggregate>> ListCollationReportsAsync(
+        Guid instituteId, Guid reportingPeriodId, CancellationToken ct);
     Task<StaffQuarterlyReportAggregate?> FindAggregateAsync(Guid reportId, CancellationToken ct);
     Task<bool> StaffReportExistsAsync(Guid employeeId, Guid reportingPeriodId, Guid? excludeId, CancellationToken ct);
     Task<IReadOnlyList<Project>> FindProjectsAsync(Guid instituteId, IReadOnlyCollection<Guid> projectIds, CancellationToken ct);
     Task<IReadOnlyList<Technology>> FindTechnologiesAsync(Guid instituteId, IReadOnlyCollection<Guid> technologyIds, CancellationToken ct);
     Task<Project?> FindProjectByCodeOrNameAsync(Guid instituteId, string code, string name, CancellationToken ct);
+    Task<Project?> FindProjectByNameForEmployeeAsync(Guid instituteId, Guid employeeId, Guid userId, string name, CancellationToken ct);
+    Task<bool> PinExistsAsync(Guid instituteId, string pin, Guid? excludeProjectId, CancellationToken ct);
+    Task<Project?> FindProjectForPinAssignmentAsync(Guid instituteId, Guid projectId, CancellationToken ct);
+    Task<Csir.Spme.Domain.Org.Institute?> FindInstituteAsync(Guid instituteId, CancellationToken ct);
     Task<Project?> FindProjectByIdAsync(Guid instituteId, Guid projectId, CancellationToken ct);
     Task<Project?> FindProjectForUpdateAsync(Guid instituteId, Guid projectId, CancellationToken ct);
     Task<Technology?> FindTechnologyByCodeOrNameAsync(Guid instituteId, string code, string name, CancellationToken ct);

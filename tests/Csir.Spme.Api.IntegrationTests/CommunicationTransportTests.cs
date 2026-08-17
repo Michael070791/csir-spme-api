@@ -91,9 +91,9 @@ public sealed class CommunicationTransportTests
             "2026 Quarter 3", "Coastal materials", "Research abstract", "Completed sampling",
             "Validated samples", "Continue analysis", ["Water quality project"], [],
             [new StaffQuarterlyProjectReportContent(
-                "WATER-01", "Water quality project", "Ada Researcher", "12 months", "CSIR",
+                "WATER-01", "Water quality project", "PIN-001", "Ada Researcher", "12 months", "CSIR",
                 "Accra", "Assess water quality", "Laboratory analysis", "Public health need",
-                "Coastal communities", "Water sensor", "Validated methodology",
+                "Coastal communities", "Water sensor", "Licensing pathway", "Validated methodology",
                 "Completed sampling", "Validated samples", "Heavy rainfall", "Laboratory analysis",
                 "Continue analysis", 1, 0)],
             ["sampling-site.jpg"], DateTimeOffset.UtcNow));

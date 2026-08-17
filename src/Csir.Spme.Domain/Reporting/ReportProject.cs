@@ -26,7 +26,9 @@ public sealed class ReportProject : BaseEntity
     public string? SnapshotJustification { get; private set; }
     public string? SnapshotExpectedBeneficiaries { get; private set; }
     public string? SnapshotPotentialTechnology { get; private set; }
+    public string? SnapshotCommercialization { get; private set; }
     public string? SnapshotContributionToKnowledge { get; private set; }
+    public string? SnapshotPin { get; private set; }
 
     private ReportProject() { }
 
@@ -74,7 +76,9 @@ public sealed class ReportProject : BaseEntity
         string? justification,
         string? expectedBeneficiaries,
         string? potentialTechnology,
-        string? contributionToKnowledge)
+        string? commercialization,
+        string? contributionToKnowledge,
+        string? pin = null)
     {
         CaptureSnapshot(code, name);
         SnapshotLeadName = leadName;
@@ -88,7 +92,9 @@ public sealed class ReportProject : BaseEntity
         SnapshotJustification = justification;
         SnapshotExpectedBeneficiaries = expectedBeneficiaries;
         SnapshotPotentialTechnology = potentialTechnology;
+        SnapshotCommercialization = commercialization;
         SnapshotContributionToKnowledge = contributionToKnowledge;
+        SnapshotPin = pin;
     }
 
     private static string? NormalizeOptional(string? value) =>

@@ -193,6 +193,7 @@ public sealed record PortalProfileResponse(
     IReadOnlyList<string> LeadershipRoles,
     bool IsHod,
     bool IsDirector,
+    bool IsScientificSecretary,
     string? DivisionName = null,
     string? SectionName = null,
     int? ProfileCompletion = null);
