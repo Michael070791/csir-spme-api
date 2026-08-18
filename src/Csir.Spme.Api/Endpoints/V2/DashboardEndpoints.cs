@@ -16,8 +16,8 @@ internal static class DashboardEndpoints
             .WithGroupName("v2")
             .WithTags("Staff Portal")
             .WithName("StaffPortal_GetDashboard")
-            .WithSummary("Get the authenticated employee dashboard.")
-            .WithDescription("Returns a bounded, non-cacheable projection derived only from the authenticated employee and institute claims.")
+            .WithSummary("Get the authenticated staff workspace.")
+            .WithDescription("Returns a bounded, non-cacheable projection of leave, announcements, promotion status, notifications, profile completion, and skeletal-staff activity derived only from the authenticated employee and institute claims.")
             .RequireAuthorization()
             .Produces<StaffDashboardResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);

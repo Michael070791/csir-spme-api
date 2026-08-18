@@ -96,8 +96,9 @@ internal static class StaffQuarterlyReportEndpoints
             .Produces<DataResponse<StaffQuarterlyReportResponse>>().ProducesProblem(StatusCodes.Status409Conflict)
             .ProducesProblem(StatusCodes.Status412PreconditionFailed);
         reports.MapPost("/project-drafts", CreateProjectDraftAsync).RequireAuthorization(AuthorizationPolicies.ManageOwnReports)
-            .WithName("StaffQuarterlyReports_CreateProjectDraft").WithSummary("Create or resolve a Form 1 project draft.")
-            .WithDescription("Creates an institute-scoped project and Form 1 draft for the authenticated employee, or returns an existing project matched by code or name. Form 1 fields and the principal investigator's institute are validated; the status indicates whether creation occurred.")
+            .WithName("StaffQuarterlyReports_CreateProjectDraft")
+            .WithSummary("Create a Form 1 project for the authenticated employee.")
+            .WithDescription("Creates an institute-scoped Form 1 project owned by the authenticated employee, or returns an existing project matched by name. Staff never send PIN or the internal catalog code; the server generates the code and Scientific Secretary assigns PIN later.")
             .Produces<DataResponse<StaffQuarterlyCatalogOption>>(StatusCodes.Status200OK)
             .Produces<DataResponse<StaffQuarterlyCatalogOption>>(StatusCodes.Status201Created);
         reports.MapPut("/projects/{projectId:guid}/inception", UpsertProjectInceptionAsync)
@@ -135,8 +136,9 @@ internal static class StaffQuarterlyReportEndpoints
             .WithDescription("Completes only the authenticated employee's own upload session after verifying declared size, content type, file signature, SHA-256 checksum, ownership, editability, and image-count limits. The confidential file is malware-scanned before attachment; invalid content or lifecycle conflicts use problem details.")
             .Produces<DataResponse<StaffQuarterlyFileMetadata>>();
         reports.MapPost("/technology-drafts", CreateTechnologyDraftAsync).RequireAuthorization(AuthorizationPolicies.ManageOwnReports)
-            .WithName("StaffQuarterlyReports_CreateTechnologyDraft").WithSummary("Create or resolve a minimal institute technology draft.")
-            .WithDescription("Creates an institute-scoped technology draft owned by the authenticated employee, or resolves an existing technology with the same code or name. Required catalog fields are validated and no resource from another institute is exposed.")
+            .WithName("StaffQuarterlyReports_CreateTechnologyDraft")
+            .WithSummary("Create an institute technology draft for quarterly reporting.")
+            .WithDescription("Creates an institute-scoped technology owned by the authenticated employee, or resolves an existing technology with the same code or name. Required catalog fields are validated and no resource from another institute is exposed.")
             .Produces<DataResponse<StaffQuarterlyCatalogOption>>(StatusCodes.Status200OK)
             .Produces<DataResponse<StaffQuarterlyCatalogOption>>(StatusCodes.Status201Created);
     }
