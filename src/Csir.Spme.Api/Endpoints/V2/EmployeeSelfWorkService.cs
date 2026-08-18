@@ -1,4 +1,5 @@
 using Csir.Spme.Application.Common;
+using Csir.Spme.Domain.Constants;
 using Csir.Spme.Domain.Hr;
 using Csir.Spme.Domain.Org;
 using Csir.Spme.Infrastructure.Persistence;
@@ -54,6 +55,23 @@ internal static class EmployeeSelfWorkService
             })
             .ToList();
 
+        var divisionName = currentEmployment.DivisionId is Guid divisionId
+            ? await db.Divisions.AsNoTracking()
+                .Where(division => division.Id == divisionId)
+                .Select(division => division.Name)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var sectionName = currentEmployment.SectionId is Guid sectionId
+            ? await db.Sections.AsNoTracking()
+                .Where(section => section.Id == sectionId)
+                .Select(section => section.Name)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var instituteName = await db.Institutes.AsNoTracking()
+            .Where(institute => institute.Id == currentEmployment.InstituteId)
+            .Select(institute => institute.Name)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var yearsInCurrentGrade = YearsInCurrentGrade(
             currentEmployment.GradeId,
             selfReported,
@@ -73,6 +91,14 @@ internal static class EmployeeSelfWorkService
                 currentGrade?.Code,
                 currentGrade?.Name ?? currentEmployment.JobTitle),
             decimal.Round(yearsInCurrentGrade, 2),
+            currentEmployment.StaffCategory,
+            currentEmployment.JobTitle,
+            instituteName,
+            divisionName,
+            sectionName,
+            currentEmployment.Location,
+            currentEmployment.AreaOfSpecialization,
+            currentEmployment.ResearchInterests,
             gradePromotions,
             updatedAt);
     }
@@ -83,35 +109,39 @@ internal static class EmployeeSelfWorkService
         SpmeDbContext db,
         CancellationToken cancellationToken)
     {
-        if (request.GradePromotions is null || request.GradePromotions.Count == 0)
-            return Error.Validation("At least one grade promotion date is required.");
-
         var currentEmployment = await db.EmploymentRecords.AsNoTracking()
             .SingleOrDefaultAsync(record => record.EmployeeId == employeeId && record.IsCurrent, cancellationToken);
         if (currentEmployment is null)
             return Error.Validation("A current employment record is required before work history can be saved.");
 
-        Grade? currentGrade = null;
-        if (currentEmployment.GradeId is Guid currentGradeId)
-            currentGrade = await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == currentGradeId, cancellationToken);
-
-        var allowedGradeIds = (await LoadGradeLadderAsync(db, currentEmployment.StaffCategory, currentGrade, cancellationToken))
-            .Select(item => item.Id)
-            .ToHashSet();
-
-        var today = DateTime.UtcNow.Date;
-        foreach (var item in request.GradePromotions)
+        if (request.GradePromotions is { Count: > 0 })
         {
-            if (!allowedGradeIds.Contains(item.GradeId))
-                return Error.Validation("One or more grades are outside your authorized promotion history.");
+            Grade? currentGrade = null;
+            if (currentEmployment.GradeId is Guid currentGradeId)
+                currentGrade = await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == currentGradeId, cancellationToken);
 
-            if (item.PromotionDate is null)
-                continue;
+            var allowedGradeIds = (await LoadGradeLadderAsync(db, currentEmployment.StaffCategory, currentGrade, cancellationToken))
+                .Select(item => item.Id)
+                .ToHashSet();
 
-            var promotionDate = item.PromotionDate.Value.Date;
-            if (promotionDate > today)
-                return Error.Validation("Promotion dates cannot be in the future.");
+            var today = DateTime.UtcNow.Date;
+            foreach (var item in request.GradePromotions)
+            {
+                if (!allowedGradeIds.Contains(item.GradeId))
+                    return Error.Validation("One or more grades are outside your authorized promotion history.");
+
+                if (item.PromotionDate is null)
+                    continue;
+
+                var promotionDate = item.PromotionDate.Value.Date;
+                if (promotionDate > today)
+                    return Error.Validation("Promotion dates cannot be in the future.");
+            }
         }
+
+        if (!string.IsNullOrWhiteSpace(request.ResearchInterests) &&
+            !string.Equals(currentEmployment.StaffCategory, StaffCategories.SeniorMember, StringComparison.OrdinalIgnoreCase))
+            return Error.Validation("Research interests can be recorded only for senior members.");
 
         return null;
     }
@@ -122,34 +152,51 @@ internal static class EmployeeSelfWorkService
         SpmeDbContext db,
         CancellationToken cancellationToken)
     {
-        var existing = await db.EmployeeGradePromotionDates
-            .Where(item => item.EmployeeId == employeeId)
-            .ToDictionaryAsync(item => item.GradeId, cancellationToken);
-
-        foreach (var item in request.GradePromotions)
+        if (request.GradePromotions is { Count: > 0 })
         {
-            if (item.PromotionDate is null)
-            {
-                if (existing.TryGetValue(item.GradeId, out var stored))
-                    db.EmployeeGradePromotionDates.Remove(stored);
-                continue;
-            }
+            var existing = await db.EmployeeGradePromotionDates
+                .Where(item => item.EmployeeId == employeeId)
+                .ToDictionaryAsync(item => item.GradeId, cancellationToken);
 
-            var promotionDate = item.PromotionDate.Value.Date;
-            if (existing.TryGetValue(item.GradeId, out var storedDate))
-                storedDate.Update(promotionDate);
-            else
-                db.EmployeeGradePromotionDates.Add(new EmployeeGradePromotionDate(employeeId, item.GradeId, promotionDate));
+            foreach (var item in request.GradePromotions)
+            {
+                if (item.PromotionDate is null)
+                {
+                    if (existing.TryGetValue(item.GradeId, out var stored))
+                        db.EmployeeGradePromotionDates.Remove(stored);
+                    continue;
+                }
+
+                var promotionDate = item.PromotionDate.Value.Date;
+                if (existing.TryGetValue(item.GradeId, out var storedDate))
+                    storedDate.Update(promotionDate);
+                else
+                    db.EmployeeGradePromotionDates.Add(new EmployeeGradePromotionDate(employeeId, item.GradeId, promotionDate));
+            }
         }
 
         var currentEmployment = await db.EmploymentRecords
             .SingleOrDefaultAsync(record => record.EmployeeId == employeeId && record.IsCurrent, cancellationToken);
-        if (currentEmployment?.GradeId is Guid currentGradeId)
+        if (currentEmployment is null)
+            return;
+
+        if (request.GradePromotions is { Count: > 0 } && currentEmployment.GradeId is Guid currentGradeId)
         {
             var currentDate = request.GradePromotions
                 .SingleOrDefault(item => item.GradeId == currentGradeId)?.PromotionDate?.Date;
             currentEmployment.UpdateSelfPromotionDate(currentDate);
         }
+
+        var researchInterests = string.Equals(
+            currentEmployment.StaffCategory,
+            StaffCategories.SeniorMember,
+            StringComparison.OrdinalIgnoreCase)
+            ? request.ResearchInterests ?? currentEmployment.ResearchInterests
+            : currentEmployment.ResearchInterests;
+        currentEmployment.UpdateSelfWorkDetails(
+            request.Location ?? currentEmployment.Location,
+            request.AreaOfSpecialization ?? currentEmployment.AreaOfSpecialization,
+            researchInterests);
 
         await db.SaveChangesAsync(cancellationToken);
     }

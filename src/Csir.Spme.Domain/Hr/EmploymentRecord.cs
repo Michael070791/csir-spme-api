@@ -23,6 +23,7 @@ public class EmploymentRecord : BaseEntity
     public string? Location { get; private set; }
     public string? Region { get; private set; }
     public string? District { get; private set; }
+    public string? ResearchInterests { get; private set; }
     public string? PensionType { get; private set; }
     public string? PensionId { get; private set; }
     public DateTime EffectiveFrom { get; private set; }
@@ -166,6 +167,14 @@ public class EmploymentRecord : BaseEntity
     public void UpdateSelfPromotionDate(DateTime? promotionDate)
     {
         PromotionDate = promotionDate?.Date;
+        UpdatedAt = DateTimeOffset.UtcNow;
+    }
+
+    public void UpdateSelfWorkDetails(string? location, string? areaOfSpecialization, string? researchInterests)
+    {
+        Location = NormalizeOptional(location);
+        AreaOfSpecialization = NormalizeOptional(areaOfSpecialization);
+        ResearchInterests = NormalizeOptional(researchInterests);
         UpdatedAt = DateTimeOffset.UtcNow;
     }
 

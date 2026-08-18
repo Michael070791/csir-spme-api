@@ -38,6 +38,7 @@ public sealed class EmployeeSelfWorkEndpointTests : IClassFixture<SpmeApiFactory
         body.Should().NotBeNull();
         body!.AppointmentDate.Should().Be(new DateTime(2015, 3, 1));
         body.CurrentGrade.GradeName.Should().Be("Senior Technologist");
+        body.StaffCategory.Should().Be(StaffCategories.SeniorStaff);
         body.GradePromotions.Should().HaveCount(3);
         body.GradePromotions.Select(item => item.GradeName).Should().ContainInOrder(
             "Technical Officer",
@@ -64,6 +65,78 @@ public sealed class EmployeeSelfWorkEndpointTests : IClassFixture<SpmeApiFactory
         saved.GradePromotions.Single(item => item.IsCurrent).PromotionDate
             .Should().Be(new DateTime(2022, 1, 15));
         saved.YearsInCurrentGrade.Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public async Task SelfWork_Allows_Staff_To_Update_Location_And_Specialization()
+    {
+        var seed = await SeedEmployeeWithGradeLadderAsync();
+        using var client = CreateClient(seed.Token);
+
+        var update = new UpdateEmployeeSelfWorkRequest(
+            GradePromotions: null,
+            Location: "Accra",
+            AreaOfSpecialization: "Forest products");
+        var patch = await client.PatchAsJsonAsync($"/api/v2/employees/{seed.EmployeeId}/self-work", update);
+        patch.StatusCode.Should().Be(HttpStatusCode.OK, await patch.Content.ReadAsStringAsync());
+        var saved = await patch.Content.ReadFromJsonAsync<EmployeeSelfWorkResponse>();
+        saved!.Location.Should().Be("Accra");
+        saved.AreaOfSpecialization.Should().Be("Forest products");
+        saved.StaffCategory.Should().Be(StaffCategories.SeniorStaff);
+    }
+
+    [Fact]
+    public async Task SelfWork_Allows_Senior_Members_To_Update_Research_Interests()
+    {
+        var seed = await SeedEmployeeWithGradeLadderAsync();
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+            var employment = db.EmploymentRecords.Single(record =>
+                record.EmployeeId == seed.EmployeeId && record.IsCurrent);
+            employment.UpdateCurrent(
+                employment.DivisionId,
+                employment.SectionId,
+                employment.PositionTypeId,
+                employment.GradeId,
+                employment.JobTitle,
+                employment.LeadershipRoles,
+                StaffCategories.SeniorMember,
+                employment.GradeStep,
+                employment.AreaOfSpecialization,
+                employment.ServiceStatus,
+                employment.Organization,
+                employment.Location,
+                employment.Region,
+                employment.District,
+                employment.AppointmentDate,
+                employment.PromotionDate,
+                employment.PensionType,
+                employment.PensionId);
+            await db.SaveChangesAsync();
+        }
+
+        using var client = CreateClient(seed.Token);
+        var update = new UpdateEmployeeSelfWorkRequest(
+            GradePromotions: null,
+            ResearchInterests: "Coastal materials and water quality.");
+        var patch = await client.PatchAsJsonAsync($"/api/v2/employees/{seed.EmployeeId}/self-work", update);
+        patch.StatusCode.Should().Be(HttpStatusCode.OK, await patch.Content.ReadAsStringAsync());
+        var saved = await patch.Content.ReadFromJsonAsync<EmployeeSelfWorkResponse>();
+        saved!.ResearchInterests.Should().Be("Coastal materials and water quality.");
+    }
+
+    [Fact]
+    public async Task SelfWork_Rejects_Research_Interests_For_Non_Senior_Members()
+    {
+        var seed = await SeedEmployeeWithGradeLadderAsync();
+        using var client = CreateClient(seed.Token);
+
+        var update = new UpdateEmployeeSelfWorkRequest(
+            GradePromotions: null,
+            ResearchInterests: "Should not be stored.");
+        var patch = await client.PatchAsJsonAsync($"/api/v2/employees/{seed.EmployeeId}/self-work", update);
+        patch.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
     }
 
     [Fact]

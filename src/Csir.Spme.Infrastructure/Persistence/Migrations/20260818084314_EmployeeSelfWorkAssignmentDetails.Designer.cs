@@ -4,6 +4,7 @@ using Csir.Spme.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace Csir.Spme.Infrastructure.Persistence.Migrations
 {
     [DbContext(typeof(SpmeDbContext))]
-    partial class SpmeDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260818084314_EmployeeSelfWorkAssignmentDetails")]
+    partial class EmployeeSelfWorkAssignmentDetails
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

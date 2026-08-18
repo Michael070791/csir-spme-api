@@ -46,6 +46,7 @@ public class EmploymentRecordConfiguration : IEntityTypeConfiguration<Employment
         builder.Property(x => x.Organization).HasMaxLength(256);
         builder.Property(x => x.Location).HasMaxLength(128);
         builder.Property(x => x.Region).HasMaxLength(128);
+        builder.Property(x => x.ResearchInterests).HasMaxLength(2000);
         builder.Property(x => x.District).HasMaxLength(128);
         builder.Property(x => x.PensionType).HasMaxLength(32);
         builder.Property(x => x.PensionId).HasMaxLength(128);

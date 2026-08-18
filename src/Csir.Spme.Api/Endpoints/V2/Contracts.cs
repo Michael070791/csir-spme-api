@@ -443,6 +443,14 @@ public sealed record EmployeeSelfWorkResponse(
     DateTime? AppointmentDate,
     EmployeeSelfWorkCurrentGradeResponse CurrentGrade,
     decimal YearsInCurrentGrade,
+    string? StaffCategory,
+    string? JobTitle,
+    string? InstituteName,
+    string? DivisionName,
+    string? SectionName,
+    string? Location,
+    string? AreaOfSpecialization,
+    string? ResearchInterests,
     IReadOnlyList<EmployeeSelfWorkGradePromotionResponse> GradePromotions,
     DateTimeOffset UpdatedAt);
 
@@ -451,7 +459,10 @@ public sealed record UpdateEmployeeGradePromotionRequest(
     DateTime? PromotionDate);
 
 public sealed record UpdateEmployeeSelfWorkRequest(
-    IReadOnlyList<UpdateEmployeeGradePromotionRequest> GradePromotions);
+    IReadOnlyList<UpdateEmployeeGradePromotionRequest>? GradePromotions = null,
+    [property: StringLength(128)] string? Location = null,
+    [property: StringLength(256)] string? AreaOfSpecialization = null,
+    [property: StringLength(2000)] string? ResearchInterests = null);
 
 public sealed record EmployeeProfileDocumentResponse(
     Guid Id,

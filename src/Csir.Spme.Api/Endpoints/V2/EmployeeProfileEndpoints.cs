@@ -57,15 +57,15 @@ internal static class EmployeeProfileEndpoints
 
         profile.MapGet("/self-work", GetSelfWorkAsync)
             .WithName("EmployeeProfile_GetSelfWork")
-            .WithSummary("Get the authenticated employee's work and grade history.")
-            .WithDescription("Returns the date of first appointment, current grade, years in the present grade, and promotion dates for each grade in the employee's promotion ladder. Other employee identifiers receive a non-disclosing not-found response.")
+            .WithSummary("Get the authenticated employee's work assignment and grade history.")
+            .WithDescription("Returns appointment date, current grade, years in the present grade, institute, division, section, location, area of specialization, and research interests for senior members, plus promotion dates in the employee's ladder. Other employee identifiers receive a non-disclosing not-found response. Personal contact details stay on self-contact.")
             .Produces<EmployeeSelfWorkResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound);
 
         profile.MapPatch("/self-work", UpdateSelfWorkAsync)
             .WithName("EmployeeProfile_UpdateSelfWork")
-            .WithSummary("Update self-reported promotion dates for prior and current grades.")
-            .WithDescription("Stores staff-entered promotion dates for grades in the employee's promotion ladder. The date of first appointment remains HR-controlled. Current-grade dates also update the current employment promotion date used by promotion status.")
+            .WithSummary("Update self-service work assignment and promotion dates.")
+            .WithDescription("Staff may update location, area of specialization, research interests (senior members only), and promotion dates for grades in their ladder. Institute, division, section, job title, staff category, and first appointment remain HR-controlled. Callers cannot update another employee's work details.")
             .Produces<EmployeeSelfWorkResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status404NotFound);
@@ -322,7 +322,7 @@ internal static class EmployeeProfileEndpoints
 
         await EmployeeSelfWorkService.ApplyUpdateAsync(employeeId, request, db, ct);
         await audit.RecordAndSaveAsync("employee.self-work-updated", "Employee", employeeId.ToString(),
-            null, $"grades={request.GradePromotions.Count}", ct);
+            null, $"grades={request.GradePromotions?.Count ?? 0}", ct);
 
         var response = await EmployeeSelfWorkService.BuildAsync(employeeId, db, ct);
         if (response is null)
