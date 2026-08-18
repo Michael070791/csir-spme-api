@@ -67,6 +67,49 @@ public sealed class EmployeeSelfWorkEndpointTests : IClassFixture<SpmeApiFactory
     }
 
     [Fact]
+    public async Task SelfWork_Counts_Years_From_Appointment_When_Promotion_Date_Is_Missing()
+    {
+        var seed = await CreateEmployeeUserAsync();
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+            var employment = db.EmploymentRecords.Single(record =>
+                record.EmployeeId == seed.EmployeeId && record.IsCurrent);
+            employment.UpdateCurrent(
+                employment.DivisionId,
+                employment.SectionId,
+                employment.PositionTypeId,
+                employment.GradeId,
+                employment.JobTitle,
+                employment.LeadershipRoles,
+                employment.StaffCategory,
+                employment.GradeStep,
+                employment.AreaOfSpecialization,
+                employment.ServiceStatus,
+                employment.Organization,
+                employment.Location,
+                employment.Region,
+                employment.District,
+                new DateTime(2021, 1, 1),
+                null,
+                employment.PensionType,
+                employment.PensionId);
+            await db.SaveChangesAsync();
+        }
+
+        using var client = CreateClient(CreateToken(seed.UserId, seed.EmployeeId));
+        var response = await client.GetAsync($"/api/v2/employees/{seed.EmployeeId}/self-work");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await response.Content.ReadFromJsonAsync<EmployeeSelfWorkResponse>();
+        var expected = Math.Max(0m, (decimal)(DateTimeOffset.UtcNow - new DateTimeOffset(2021, 1, 1, 0, 0, 0, TimeSpan.Zero)).TotalDays / 365.2425m);
+
+        body.Should().NotBeNull();
+        body!.AppointmentDate.Should().Be(new DateTime(2021, 1, 1));
+        body.YearsInCurrentGrade.Should().BeApproximately(decimal.Round(expected, 2), 0.02m);
+        body.YearsInCurrentGrade.Should().BeGreaterThan(5);
+    }
+
+    [Fact]
     public async Task SelfWork_Rejects_Forged_Employee_Access()
     {
         var seed = await SeedEmployeeWithGradeLadderAsync();

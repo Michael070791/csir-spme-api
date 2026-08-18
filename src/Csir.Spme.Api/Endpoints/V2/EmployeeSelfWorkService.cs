@@ -54,16 +54,13 @@ internal static class EmployeeSelfWorkService
             })
             .ToList();
 
-        var currentPromotionDate = currentEmployment.GradeId is Guid gradeId
-            ? ResolvePromotionDate(gradeId, selfReported, employmentByGrade)
-            : null;
-        var tenureStart = currentPromotionDate
-            ?? currentEmployment.PromotionDate?.Date
-            ?? (DateTime?)currentEmployment.EffectiveFrom.Date
-            ?? currentEmployment.AppointmentDate?.Date;
-        var yearsInCurrentGrade = tenureStart is null
-            ? 0m
-            : Math.Max(0m, ((decimal)(DateTime.UtcNow.Date - tenureStart.Value).TotalDays) / DaysPerPromotionYear);
+        var yearsInCurrentGrade = YearsInCurrentGrade(
+            currentEmployment.GradeId,
+            selfReported,
+            employmentRecords,
+            currentEmployment.PromotionDate,
+            currentEmployment.AppointmentDate,
+            DateTimeOffset.UtcNow);
 
         var updatedAt = selfReportedRecords.Count > 0
             ? selfReportedRecords.Max(item => item.UpdatedAt)
@@ -155,6 +152,52 @@ internal static class EmployeeSelfWorkService
         }
 
         await db.SaveChangesAsync(cancellationToken);
+    }
+
+    internal static decimal YearsInCurrentGrade(
+        Guid? currentGradeId,
+        IReadOnlyDictionary<Guid, DateTime> selfReported,
+        IReadOnlyCollection<EmploymentRecord> employmentRecords,
+        DateTime? employmentPromotionDate,
+        DateTime? appointmentDate,
+        DateTimeOffset now)
+    {
+        var tenureStart = ResolveTenureStart(
+            currentGradeId,
+            selfReported,
+            employmentRecords,
+            employmentPromotionDate,
+            appointmentDate);
+        if (tenureStart is null)
+            return 0m;
+
+        var elapsed = now - new DateTimeOffset(DateTime.SpecifyKind(tenureStart.Value, DateTimeKind.Utc));
+        return Math.Max(0m, (decimal)elapsed.TotalDays / DaysPerPromotionYear);
+    }
+
+    internal static DateTime? ResolveTenureStart(
+        Guid? currentGradeId,
+        IReadOnlyDictionary<Guid, DateTime> selfReported,
+        IReadOnlyCollection<EmploymentRecord> employmentRecords,
+        DateTime? employmentPromotionDate,
+        DateTime? appointmentDate)
+    {
+        if (currentGradeId is Guid gradeId && selfReported.TryGetValue(gradeId, out var selfDate))
+            return selfDate.Date;
+
+        var recordedPromotions = employmentRecords
+            .Select(record => record.PromotionDate?.Date)
+            .Where(date => date.HasValue)
+            .Select(date => date!.Value)
+            .Concat(selfReported.Values.Select(date => date.Date))
+            .ToList();
+        if (employmentPromotionDate.HasValue)
+            recordedPromotions.Add(employmentPromotionDate.Value.Date);
+
+        if (recordedPromotions.Count > 0)
+            return recordedPromotions.Max();
+
+        return appointmentDate?.Date;
     }
 
     private static DateTime? ResolvePromotionDate(
