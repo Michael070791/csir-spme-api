@@ -34,7 +34,10 @@ internal static class EmployeeSelfWorkService
             .GroupBy(record => record.GradeId!.Value)
             .ToDictionary(
                 group => group.Key,
-                group => group.Select(record => record.PromotionDate ?? (DateTime?)record.EffectiveFrom.Date).FirstOrDefault());
+                group => group.Select(record => RecordedPromotionDate(
+                    record.PromotionDate,
+                    record.EffectiveFrom,
+                    record.AppointmentDate ?? currentEmployment.AppointmentDate)).FirstOrDefault());
 
         Grade? currentGrade = null;
         if (currentEmployment.GradeId is Guid currentGradeId)
@@ -46,6 +49,13 @@ internal static class EmployeeSelfWorkService
             {
                 var isCurrent = currentEmployment.GradeId == grade.Id;
                 var promotionDate = ResolvePromotionDate(grade.Id, selfReported, employmentByGrade);
+                if (isCurrent)
+                {
+                    promotionDate = RecordedPromotionDate(
+                        promotionDate,
+                        currentEmployment.EffectiveFrom,
+                        currentEmployment.AppointmentDate);
+                }
                 return new EmployeeSelfWorkGradePromotionResponse(
                     grade.Id,
                     grade.Code,
@@ -76,8 +86,12 @@ internal static class EmployeeSelfWorkService
             currentEmployment.GradeId,
             selfReported,
             employmentRecords,
-            currentEmployment.PromotionDate,
+            RecordedPromotionDate(
+                currentEmployment.PromotionDate,
+                currentEmployment.EffectiveFrom,
+                currentEmployment.AppointmentDate),
             currentEmployment.AppointmentDate,
+            currentEmployment.EffectiveFrom,
             DateTimeOffset.UtcNow);
 
         var updatedAt = selfReportedRecords.Count > 0
@@ -207,6 +221,7 @@ internal static class EmployeeSelfWorkService
         IReadOnlyCollection<EmploymentRecord> employmentRecords,
         DateTime? employmentPromotionDate,
         DateTime? appointmentDate,
+        DateTime employmentEffectiveFrom,
         DateTimeOffset now)
     {
         var tenureStart = ResolveTenureStart(
@@ -214,7 +229,8 @@ internal static class EmployeeSelfWorkService
             selfReported,
             employmentRecords,
             employmentPromotionDate,
-            appointmentDate);
+            appointmentDate,
+            employmentEffectiveFrom);
         if (tenureStart is null)
             return 0m;
 
@@ -227,16 +243,24 @@ internal static class EmployeeSelfWorkService
         IReadOnlyDictionary<Guid, DateTime> selfReported,
         IReadOnlyCollection<EmploymentRecord> employmentRecords,
         DateTime? employmentPromotionDate,
-        DateTime? appointmentDate)
+        DateTime? appointmentDate,
+        DateTime employmentEffectiveFrom)
     {
         if (currentGradeId is Guid gradeId && selfReported.TryGetValue(gradeId, out var selfDate))
-            return selfDate.Date;
+        {
+            var recordedSelf = RecordedPromotionDate(selfDate, employmentEffectiveFrom, appointmentDate);
+            if (recordedSelf.HasValue)
+                return recordedSelf;
+        }
 
         var recordedPromotions = employmentRecords
-            .Select(record => record.PromotionDate?.Date)
+            .Select(record => RecordedPromotionDate(record.PromotionDate, record.EffectiveFrom, appointmentDate))
             .Where(date => date.HasValue)
             .Select(date => date!.Value)
-            .Concat(selfReported.Values.Select(date => date.Date))
+            .Concat(selfReported.Values
+                .Select(date => RecordedPromotionDate(date, employmentEffectiveFrom, appointmentDate))
+                .Where(date => date.HasValue)
+                .Select(date => date!.Value))
             .ToList();
         if (employmentPromotionDate.HasValue)
             recordedPromotions.Add(employmentPromotionDate.Value.Date);
@@ -247,15 +271,30 @@ internal static class EmployeeSelfWorkService
         return appointmentDate?.Date;
     }
 
+    internal static DateTime? RecordedPromotionDate(
+        DateTime? promotionDate,
+        DateTime effectiveFrom,
+        DateTime? appointmentDate)
+    {
+        if (promotionDate is not { } promotion)
+            return null;
+
+        var date = promotion.Date;
+        if (date == effectiveFrom.Date && appointmentDate is { } appointment && appointment.Date < date)
+            return null;
+
+        return date;
+    }
+
     private static DateTime? ResolvePromotionDate(
         Guid gradeId,
         IReadOnlyDictionary<Guid, DateTime> selfReported,
         IReadOnlyDictionary<Guid, DateTime?> employmentByGrade)
     {
         if (selfReported.TryGetValue(gradeId, out var selfDate))
-            return selfDate;
+            return selfDate.Date;
         if (employmentByGrade.TryGetValue(gradeId, out var employmentDate))
-            return employmentDate;
+            return employmentDate?.Date;
         return null;
     }
 

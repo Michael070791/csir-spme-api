@@ -13,6 +13,7 @@ using Csir.Spme.Domain.Org;
 using Csir.Spme.Infrastructure.Persistence;
 using FluentAssertions;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.Tokens;
@@ -180,6 +181,59 @@ public sealed class EmployeeSelfWorkEndpointTests : IClassFixture<SpmeApiFactory
         body!.AppointmentDate.Should().Be(new DateTime(2021, 1, 1));
         body.YearsInCurrentGrade.Should().BeApproximately(decimal.Round(expected, 2), 0.02m);
         body.YearsInCurrentGrade.Should().BeGreaterThan(5);
+        body.YearsInCurrentGrade.Should().NotBe(0);
+    }
+
+    [Fact]
+    public async Task SelfWork_Does_Not_Treat_Employment_Start_As_Last_Promotion()
+    {
+        var seed = await SeedEmployeeWithGradeLadderAsync();
+        var employmentStart = new DateTime(2026, 8, 14);
+        await using (var scope = _factory.Services.CreateAsyncScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
+            var employment = db.EmploymentRecords.Single(record =>
+                record.EmployeeId == seed.EmployeeId && record.IsCurrent);
+            db.EmploymentRecords.Remove(employment);
+            db.EmploymentRecords.Add(new EmploymentRecord(
+                employment.EmployeeId,
+                employment.InstituteId,
+                employment.DivisionId,
+                employment.SectionId,
+                employment.PositionTypeId,
+                seed.StoGradeId,
+                "Senior Technical Officer",
+                employment.LeadershipRoles,
+                employment.StaffCategory,
+                employment.GradeStep,
+                employment.AreaOfSpecialization,
+                employment.ServiceStatus,
+                employment.Organization,
+                employment.Location,
+                employment.Region,
+                employment.District,
+                new DateTime(2021, 1, 1),
+                employmentStart,
+                employment.PensionType,
+                employment.PensionId,
+                employmentStart,
+                isCurrent: true));
+            await db.SaveChangesAsync();
+        }
+
+        using var client = CreateClient(seed.Token);
+        var response = await client.GetAsync($"/api/v2/employees/{seed.EmployeeId}/self-work");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
+        var body = await response.Content.ReadFromJsonAsync<EmployeeSelfWorkResponse>();
+        var expected = Math.Max(0m, (decimal)(DateTimeOffset.UtcNow - new DateTimeOffset(2021, 1, 1, 0, 0, 0, TimeSpan.Zero)).TotalDays / 365.2425m);
+
+        body.Should().NotBeNull();
+        body!.AppointmentDate.Should().Be(new DateTime(2021, 1, 1));
+        body.GradePromotions.Should().ContainSingle(item => item.IsCurrent);
+        body.GradePromotions.Single(item => item.IsCurrent).PromotionDate.Should().BeNull();
+        body.YearsInCurrentGrade.Should().BeApproximately(decimal.Round(expected, 2), 0.02m);
+        body.YearsInCurrentGrade.Should().BeGreaterThan(5);
+        body.YearsInCurrentGrade.Should().NotBe(0);
     }
 
     [Fact]
