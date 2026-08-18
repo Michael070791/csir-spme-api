@@ -31,7 +31,10 @@ internal static class PromotionSubmissionPreparation
 
         var employment = await db.EmploymentRecords.AsNoTracking()
             .SingleOrDefaultAsync(item => item.EmployeeId == employeeId && item.IsCurrent, cancellationToken);
-        if (employment?.GradeId is null)
+        var resolvedGrade = await PromotionEndpoints.ResolveCurrentGradeAsync(
+            db, employment?.GradeId, employment?.JobTitle, employment?.StaffCategory ?? string.Empty, cancellationToken);
+        var sourceGradeId = resolvedGrade?.Id ?? employment?.GradeId;
+        if (employment is null || sourceGradeId is null)
             return PromotionAssessmentResolution.Conflict("The employee does not have a current canonical grade.");
 
         var cycle = await db.PromotionCycles.AsNoTracking()
@@ -44,7 +47,7 @@ internal static class PromotionSubmissionPreparation
         var path = await PromotionEndpoints.MatchingPathQuery(
                 db,
                 employment.StaffCategory ?? string.Empty,
-                employment.GradeId.Value,
+                sourceGradeId.Value,
                 cycle.EffectivePromotionDate)
             .FirstOrDefaultAsync(cancellationToken);
         if (path is null)
@@ -71,7 +74,7 @@ internal static class PromotionSubmissionPreparation
             db,
             employeeId,
             employment.StaffCategory,
-            employment.GradeId,
+            sourceGradeId,
             employment.AppointmentDate,
             employment.PromotionDate,
             employment.EffectiveFrom,
@@ -81,7 +84,7 @@ internal static class PromotionSubmissionPreparation
             return PromotionAssessmentResolution.Conflict(
                 "Promotion draft preparation is not open for this employee and cycle.");
 
-        var created = await CreateAssessmentAsync(db, employee, employment, cycle, path, cancellationToken);
+        var created = await CreateAssessmentAsync(db, employee, employment, cycle, path, sourceGradeId.Value, cancellationToken);
         return new PromotionAssessmentResolution(created, windowForCreate, true, null);
     }
 
@@ -123,6 +126,7 @@ internal static class PromotionSubmissionPreparation
         Csir.Spme.Domain.Hr.EmploymentRecord employment,
         PromotionCycle cycle,
         PromotionPath path,
+        Guid sourceGradeId,
         CancellationToken cancellationToken)
     {
         var qualifications = await db.EducationRecords.AsNoTracking()
@@ -134,7 +138,7 @@ internal static class PromotionSubmissionPreparation
             .Select(item => new { item.Outcome, item.ApprovedAt })
             .ToListAsync(cancellationToken);
         var selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
-            .Where(item => item.EmployeeId == employee.Id && item.GradeId == employment.GradeId!.Value)
+            .Where(item => item.EmployeeId == employee.Id && item.GradeId == sourceGradeId)
             .Select(item => (DateTime?)item.PromotionDate)
             .FirstOrDefaultAsync(cancellationToken);
         var presentGradeStartDate = PromotionStatusWindowBuilder.ResolvePresentGradeStartDate(
@@ -158,7 +162,7 @@ internal static class PromotionSubmissionPreparation
             cycle.Id,
             path.Id,
             employment.Id,
-            employment.GradeId!.Value,
+            sourceGradeId,
             path.TargetGradeId,
             DateTime.UtcNow.Date,
             cycle.EffectivePromotionDate,

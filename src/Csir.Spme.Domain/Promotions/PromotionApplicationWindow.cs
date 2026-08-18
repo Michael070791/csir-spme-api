@@ -9,11 +9,10 @@ public static class PromotionApplicationWindow
         short minimumYearsInSourceGrade,
         DateTime evaluationDate,
         bool hasQualifyingEducationRecord,
-        bool isSeniorStaff,
-        bool hasActivePath,
+        bool allowsApplicationDraft,
         bool pathRequiresPolicyConfirmation)
     {
-        if (!isSeniorStaff || !hasActivePath || pathRequiresPolicyConfirmation ||
+        if (!allowsApplicationDraft || pathRequiresPolicyConfirmation ||
             presentGradeStart.StartDate is not { } start)
         {
             return new PromotionApplicationWindowResult(

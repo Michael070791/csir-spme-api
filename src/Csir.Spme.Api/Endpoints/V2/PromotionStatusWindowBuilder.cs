@@ -17,13 +17,22 @@ internal static class PromotionStatusWindowBuilder
         PromotionPath? path,
         CancellationToken cancellationToken)
     {
-        if (path is null || sourceGradeId is null)
-            return null;
-
-        var selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
-            .Where(item => item.EmployeeId == employeeId && item.GradeId == sourceGradeId.Value)
-            .Select(item => (DateTime?)item.PromotionDate)
-            .FirstOrDefaultAsync(cancellationToken);
+        DateTime? selfReportedPromotionDate = null;
+        if (sourceGradeId is Guid gradeId)
+        {
+            selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
+                .Where(item => item.EmployeeId == employeeId && item.GradeId == gradeId)
+                .Select(item => (DateTime?)item.PromotionDate)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+        else
+        {
+            selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
+                .Where(item => item.EmployeeId == employeeId)
+                .OrderByDescending(item => item.PromotionDate)
+                .Select(item => (DateTime?)item.PromotionDate)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
 
         var presentGradeStart = PromotionPresentGradeStart.Resolve(
             appointmentDate,
@@ -31,20 +40,23 @@ internal static class PromotionStatusWindowBuilder
             employmentEffectiveFrom,
             selfReportedPromotionDate);
 
-        var hasQualifyingEducation = await db.EducationRecords.AsNoTracking()
-            .AnyAsync(item =>
-                item.EmployeeId == employeeId &&
-                item.QualificationLevel == path.RequiredQualificationLevel,
-                cancellationToken);
-
+        var requiredLevel = PromotionStaffCheck.RequiredQualificationFor(
+            staffCategory,
+            path?.RequiredQualificationLevel);
+        var educationLevels = await db.EducationRecords.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId)
+            .Select(item => item.QualificationLevel)
+            .ToListAsync(cancellationToken);
+        var hasQualifyingEducation = PromotionStaffCheck.HasQualifyingEducation(educationLevels, requiredLevel);
+        var hasActivePath = path is not null && path.Status == PromotionConstants.PathActive;
+        var years = PromotionStaffCheck.InferredMinimumYears(staffCategory, path?.MinimumYearsInSourceGrade);
         var window = PromotionApplicationWindow.Calculate(
             presentGradeStart,
-            path.MinimumYearsInSourceGrade,
+            years,
             DateTime.UtcNow.Date,
             hasQualifyingEducation,
-            string.Equals(staffCategory, PromotionConstants.SeniorStaff, StringComparison.OrdinalIgnoreCase),
-            path.Status == PromotionConstants.PathActive,
-            path.Status == PromotionConstants.PathRequiresPolicyConfirmation);
+            PromotionStaffCheck.AllowsApplicationDraft(staffCategory, hasActivePath),
+            path?.Status == PromotionConstants.PathRequiresPolicyConfirmation);
 
         if (window.OpensOn is null)
             return null;
@@ -86,5 +98,26 @@ internal static class PromotionStatusWindowBuilder
             ? PromotionPresentGradeStart.RecordedPromotionDate(employmentPromotionDate, employmentEffectiveFrom, appointmentDate)
               ?? PromotionPresentGradeStart.RecordedPromotionDate(selfReportedPromotionDate, employmentEffectiveFrom, appointmentDate)
             : null;
+    }
+
+    public static async Task<DateTime?> ResolveSelfReportedPromotionDateAsync(
+        SpmeDbContext db,
+        Guid employeeId,
+        Guid? sourceGradeId,
+        CancellationToken cancellationToken)
+    {
+        if (sourceGradeId is Guid gradeId)
+        {
+            return await db.EmployeeGradePromotionDates.AsNoTracking()
+                .Where(item => item.EmployeeId == employeeId && item.GradeId == gradeId)
+                .Select(item => (DateTime?)item.PromotionDate)
+                .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        return await db.EmployeeGradePromotionDates.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId)
+            .OrderByDescending(item => item.PromotionDate)
+            .Select(item => (DateTime?)item.PromotionDate)
+            .FirstOrDefaultAsync(cancellationToken);
     }
 }

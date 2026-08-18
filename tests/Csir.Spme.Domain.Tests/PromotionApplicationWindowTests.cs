@@ -1,3 +1,4 @@
+using Csir.Spme.Domain.Constants;
 using Csir.Spme.Domain.Promotions;
 using FluentAssertions;
 using Xunit;
@@ -58,8 +59,7 @@ public sealed class PromotionApplicationWindowTests
             minimumYearsInSourceGrade: 4,
             evaluationDate: new DateTime(2024, 8, 1),
             hasQualifyingEducationRecord: true,
-            isSeniorStaff: true,
-            hasActivePath: true,
+            allowsApplicationDraft: true,
             pathRequiresPolicyConfirmation: false);
 
         window.ServiceDueOn.Should().Be(new DateTime(2025, 1, 1));
@@ -81,11 +81,33 @@ public sealed class PromotionApplicationWindowTests
             minimumYearsInSourceGrade: 4,
             evaluationDate: new DateTime(2024, 7, 31),
             hasQualifyingEducationRecord: true,
-            isSeniorStaff: true,
-            hasActivePath: true,
+            allowsApplicationDraft: true,
             pathRequiresPolicyConfirmation: false);
 
         window.IsOpen.Should().BeFalse();
         window.CanPrepareDraft.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Tenure_Formats_Like_The_Work_Tab()
+    {
+        PromotionStaffCheck.FormatYears(0.04m).Should().Be("Less than 1 year");
+        PromotionStaffCheck.FormatYears(3.87m).Should().Be("3.9 years");
+        PromotionStaffCheck.CompletedYears(new DateTime(2022, 10, 3), new DateTime(2026, 8, 18))
+            .Should().BeApproximately(3.87m, 0.02m);
+    }
+
+    [Fact]
+    public void Bachelor_Is_Met_When_A_Bsc_Or_Higher_Record_Exists()
+    {
+        PromotionStaffCheck.HasQualifyingEducation(
+            ["diploma", "bachelor-or-equivalent"],
+            QualificationLevels.BachelorOrEquivalent).Should().BeTrue();
+        PromotionStaffCheck.HasQualifyingEducation(
+            ["masters-or-equivalent"],
+            QualificationLevels.BachelorOrEquivalent).Should().BeTrue();
+        PromotionStaffCheck.HasQualifyingEducation(
+            ["diploma"],
+            QualificationLevels.BachelorOrEquivalent).Should().BeFalse();
     }
 }

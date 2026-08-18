@@ -31,8 +31,14 @@ public static class PromotionStatusMessages
     public const string PrepareDraftSubmission =
         "You may complete and save CSIR FORM 2 as a draft. Submission for HR review opens when your promotion cycle eligibility is confirmed.";
 
+    public const string QualifyingEducationRequired =
+        "Add a B.Sc. or equivalent on your Education tab before a promotion draft can start.";
+
     public const string ApplicationWindowClosed =
-        "Your CSIR FORM 2 application window opens on the date shown below.";
+        "CSIR FORM 2 is not open yet. The draft window starts five months before your service due date.";
+
+    public static string ApplicationWindowClosedOn(DateTime opensOn, DateTime serviceDueOn) =>
+        $"CSIR FORM 2 opens on {opensOn:d MMM yyyy}, five months before your {serviceDueOn:d MMM yyyy} service due date.";
 
     public const string EligibleCompleteRequirements =
         "Complete the required reports, documents, and declarations.";

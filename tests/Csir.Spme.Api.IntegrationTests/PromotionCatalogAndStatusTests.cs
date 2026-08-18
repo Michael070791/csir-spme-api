@@ -86,10 +86,12 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
         var mine = await owner.GetFromJsonAsync<PromotionStatusResponse>("/api/v2/promotion-status/me");
 
         mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
-        mine.AvailableActions.Should().BeEmpty();
-        mine.NextAction.Should().Be(PromotionStatusMessages.EligibleAwaitingAssessment);
+        mine.AvailableActions.Should().Contain("prepare-promotion-submission");
+        mine.AvailableActions.Should().NotContain("start-promotion-submission");
+        mine.NextAction.Should().Be(PromotionStatusMessages.PrepareDraftSubmission);
         mine.Criteria.Should().Contain(item => item.Code == "qualification" && item.Status == "satisfied");
-        mine.Criteria.Should().Contain(item => item.Code == "satisfactory-appraisal" && item.Status == "pending-hr-review");
+        mine.Criteria.Should().NotContain(item => item.Code == "satisfactory-appraisal");
+        mine.Criteria.Should().NotContain(item => item.Code == "recognised-institution");
         mine.NextPromotion!.PathCode.Should().Be("cos-s20-technical");
     }
 
@@ -102,6 +104,10 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
         mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityNotApplicable);
         mine.NextAction.Should().Be(PromotionStatusMessages.SeniorMemberComingSoon);
         mine.AvailableActions.Should().BeEmpty();
+        mine.CurrentGrade!.Name.Should().Be("Research Scientist");
+        mine.Criteria.Should().Contain(item => item.Code == "time-in-source-grade" && item.Required != null && item.Required.Contains("year"));
+        mine.Criteria.Should().NotContain(item => item.Code == "staff-category");
+        mine.Criteria.Should().NotContain(item => item.Code == "satisfactory-appraisal");
 
         var lookup = await owner.PostAsJsonAsync("/api/v2/promotion-status-lookups",
             new PromotionStatusLookupRequest(seed.StaffId, StaffCategories.SeniorMember, null));
@@ -128,6 +134,23 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
         var invalid = await owner.PostAsJsonAsync("/api/v2/promotion-status-lookups",
             new PromotionStatusLookupRequest(seed.StaffId, "contractor", null));
         invalid.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task Live_Status_Uses_Employment_Job_Title_And_Education_Records_Without_Catalog_Grade()
+    {
+        var seed = await SeedLinkedEmployeeAsync(PromotionConstants.SeniorStaff, null, verifiedDegree: true);
+        using var owner = Client(SpmeRoles.Employee, seed.EmployeeId, seed.InstituteId);
+        var mine = await owner.GetFromJsonAsync<PromotionStatusResponse>("/api/v2/promotion-status/me");
+
+        mine!.CurrentGrade!.Name.Should().Be("Officer");
+        mine.NextAction.Should().NotContain("Conditions of Service job title");
+        mine.Criteria.Should().Contain(item => item.Code == "time-in-source-grade" && item.Required != null && item.Required.Contains("year"));
+        mine.Criteria.Should().Contain(item => item.Code == "qualification" && item.Status == "satisfied");
+        mine.Criteria.Should().NotContain(item => item.Code == "staff-category");
+        mine.Criteria.Should().NotContain(item => item.Code == "satisfactory-appraisal");
+        mine.Criteria.Should().NotContain(item => item.Code == "recognised-institution");
+        mine.Criteria.Should().NotContain(item => item.Code == "relevant-field");
     }
 
     private async Task<LiveSeed> SeedLinkedEmployeeAsync(

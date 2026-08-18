@@ -2,6 +2,8 @@ using System.Security.Claims;
 using System.Text.Json;
 using Csir.Spme.Api.Auth;
 using Csir.Spme.Domain.Constants;
+using Csir.Spme.Domain.Hr;
+using Csir.Spme.Domain.Org;
 using Csir.Spme.Domain.Promotions;
 using Csir.Spme.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -285,26 +287,23 @@ internal static class PromotionEndpoints
         var appointmentDate = employment?.AppointmentDate;
         var employmentPromotionDate = employment?.PromotionDate;
         var employmentEffectiveFrom = employment?.EffectiveFrom ?? placeholderDate;
+        var resolvedGrade = await ResolveCurrentGradeAsync(
+            db, employment?.GradeId, employment?.JobTitle, staffCategory, cancellationToken);
+        var sourceGradeId = resolvedGrade?.Id ?? employment?.GradeId;
+        var selfReportedPromotionDate = employment is null
+            ? null
+            : await PromotionStatusWindowBuilder.ResolveSelfReportedPromotionDateAsync(
+                db, employeeId, sourceGradeId, cancellationToken);
         var recordedLastPromotionDate = employment is null
             ? null
             : PromotionStatusWindowBuilder.ResolveRecordedLastPromotionDate(
                 appointmentDate,
                 employmentPromotionDate,
                 employmentEffectiveFrom,
-                await db.EmployeeGradePromotionDates.AsNoTracking()
-                    .Where(item => item.EmployeeId == employeeId && employment.GradeId.HasValue && item.GradeId == employment.GradeId.Value)
-                    .Select(item => (DateTime?)item.PromotionDate)
-                    .FirstOrDefaultAsync(cancellationToken));
+                selfReportedPromotionDate);
         var lastPromotionDate = recordedLastPromotionDate;
         var sourceEffective = employment?.EffectiveFrom;
-
-        PromotionGradeRef? currentGrade = null;
-        if (employment?.GradeId is Guid sourceGradeId)
-        {
-            var sourceGrade = await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == sourceGradeId, cancellationToken);
-            if (sourceGrade is not null)
-                currentGrade = new PromotionGradeRef(sourceGrade.Code, sourceGrade.Name);
-        }
+        var currentGrade = ToGradeRef(resolvedGrade, employment?.JobTitle);
 
         if (!PromotionEligibilityEvaluator.IsAssessableStaffCategory(staffCategory))
         {
@@ -328,48 +327,20 @@ internal static class PromotionEndpoints
                 appointmentDate, lastPromotionDate, sourceEffective);
         }
 
-        if (employment?.GradeId is null)
+        if (sourceGradeId is null)
         {
-            return LiveStatus(
-                employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
-                PromotionConstants.EligibilityNeedsHrReview,
-                [
-                    new("staff-category", "satisfied", staffCategory),
-                    new("time-in-source-grade", "pending-hr-review"),
-                    new("qualification", "pending-hr-review"),
-                    new("recognised-institution", "pending-hr-review"),
-                    new("relevant-field", "pending-hr-review"),
-                    new("satisfactory-appraisal", "pending-hr-review")
-                ],
-                PromotionStatusMessages.NoCanonicalGrade,
-                null, null, currentGrade, null, null,
-                appointmentDate, lastPromotionDate, sourceEffective);
+            return await LiveCheckWithoutCatalogGradeAsync(
+                db, employee, employment, staffCategory, cycle, currentGrade,
+                appointmentDate, lastPromotionDate, employmentEffectiveFrom, cancellationToken);
         }
 
-        var path = await MatchingPathQuery(db, staffCategory, employment.GradeId.Value, cycle.EffectivePromotionDate)
+        var path = await MatchingPathQuery(db, staffCategory, sourceGradeId.Value, cycle.EffectivePromotionDate)
             .FirstOrDefaultAsync(cancellationToken);
         if (path is null)
         {
-            var noPathMessage = string.Equals(staffCategory, PromotionConstants.SeniorMember, StringComparison.OrdinalIgnoreCase)
-                ? PromotionStatusMessages.SeniorMemberComingSoon
-                : PromotionStatusMessages.NoMatchingPath;
-            var noPathState = string.Equals(staffCategory, PromotionConstants.SeniorMember, StringComparison.OrdinalIgnoreCase)
-                ? PromotionConstants.EligibilityNotApplicable
-                : PromotionConstants.EligibilityNeedsHrReview;
-            return LiveStatus(
-                employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
-                noPathState,
-                [
-                    new("staff-category", "satisfied", staffCategory),
-                    new("time-in-source-grade", "pending-hr-review"),
-                    new("qualification", "pending-hr-review"),
-                    new("recognised-institution", "pending-hr-review"),
-                    new("relevant-field", "pending-hr-review"),
-                    new("satisfactory-appraisal", "pending-hr-review")
-                ],
-                noPathMessage,
-                employment.GradeId, null, currentGrade, null, null,
-                appointmentDate, lastPromotionDate, sourceEffective);
+            return await LiveCheckWithoutMatchingPathAsync(
+                db, employee, employment, staffCategory, cycle, currentGrade, sourceGradeId.Value,
+                appointmentDate, lastPromotionDate, employmentEffectiveFrom, cancellationToken);
         }
 
         var qualifications = await db.EducationRecords.AsNoTracking()
@@ -384,10 +355,6 @@ internal static class PromotionEndpoints
             .Where(item => item.EmployeeId == employeeId)
             .Select(item => new { item.Outcome, item.ApprovedAt })
             .ToListAsync(cancellationToken);
-        var selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
-            .Where(item => item.EmployeeId == employeeId && item.GradeId == employment.GradeId.Value)
-            .Select(item => (DateTime?)item.PromotionDate)
-            .FirstOrDefaultAsync(cancellationToken);
         var presentGradeStartDate = PromotionStatusWindowBuilder.ResolvePresentGradeStartDate(
             appointmentDate,
             employmentPromotionDate,
@@ -408,7 +375,7 @@ internal static class PromotionEndpoints
             db,
             employeeId,
             staffCategory,
-            employment.GradeId,
+            sourceGradeId,
             appointmentDate,
             employmentPromotionDate,
             employmentEffectiveFrom,
@@ -430,18 +397,25 @@ internal static class PromotionEndpoints
             }
         }
 
+        var educationLevels = await db.EducationRecords.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId)
+            .Select(item => item.QualificationLevel)
+            .ToListAsync(cancellationToken);
         var availableActions = new List<string>();
-        if (evaluation.EligibilityState == PromotionConstants.EligibilityEligibleForReview)
-            availableActions.Add("start-promotion-submission");
-        else if (applicationWindow?.CanPrepareDraft == true)
+        if (applicationWindow?.CanPrepareDraft == true)
             availableActions.Add("prepare-promotion-submission");
 
         return LiveStatus(
             employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
             evaluation.EligibilityState,
-            BuildCriteria(evaluation, path.MinimumYearsInSourceGrade, path.RequiredQualificationLevel, staffCategory),
+            BuildStaffCheckCriteria(
+                presentGradeStartDate,
+                path.MinimumYearsInSourceGrade,
+                educationLevels,
+                path.RequiredQualificationLevel,
+                DateTime.UtcNow.Date),
             LiveNextAction(evaluation, cycle.CycleYear, path.MinimumYearsInSourceGrade, staffCategory, applicationWindow),
-            employment.GradeId, path.TargetGradeId, currentGrade, nextPromotion,
+            sourceGradeId, path.TargetGradeId, currentGrade, nextPromotion,
             evaluation.EligibilityState == PromotionConstants.EligibilityPolicyAmbiguity ? path.SectionReference : null,
             appointmentDate, lastPromotionDate, presentGradeStartDate, applicationWindow, availableActions);
     }
@@ -479,26 +453,157 @@ internal static class PromotionEndpoints
                            (item.EffectiveTo == null || item.EffectiveTo >= effectivePromotionDate))
             .OrderBy(item => item.Status == PromotionConstants.PathActive ? 0 : 1);
 
-    private static IReadOnlyList<PromotionStatusCriterion> BuildCriteria(
-        PromotionEligibilityEvaluation evaluation, short minimumYears, string? requiredQualification, string staffCategory)
+    private static IReadOnlyList<PromotionStatusCriterion> BuildStaffCheckCriteria(
+        DateTime? presentGradeStart,
+        short minimumYears,
+        IReadOnlyCollection<string> educationLevels,
+        string? requiredQualification,
+        DateTime asOf)
     {
-        if (evaluation.EligibilityState == PromotionConstants.EligibilityNotApplicable)
-            return [new("staff-category", "not-met", staffCategory)];
+        var requiredLevel = PromotionStaffCheck.RequiredQualificationFor(null, requiredQualification);
+        var tenureDetail = presentGradeStart is { } start
+            ? PromotionStaffCheck.FormatYears(PromotionStaffCheck.CompletedYears(start, asOf))
+            : "Not recorded";
+        var tenureStatus = presentGradeStart is { } tenureStart &&
+            asOf.Date >= tenureStart.AddYears(minimumYears).Date
+            ? "satisfied"
+            : "not-met";
+        var qualificationStatus = PromotionStaffCheck.HasQualifyingEducation(educationLevels, requiredLevel)
+            ? "satisfied"
+            : "not-met";
 
-        var qualificationStatus = PromotionEligibilityEvaluator.EvidenceCriterionStatus(
-            evaluation.QualificationSatisfied, evaluation.QualificationRejected);
-        var appraisalStatus = PromotionEligibilityEvaluator.EvidenceCriterionStatus(
-            evaluation.AppraisalSatisfied, evaluation.AppraisalRejected);
         return
         [
-            new("staff-category", "satisfied", staffCategory),
-            Criterion("time-in-source-grade", evaluation.BlockingReasons ?? [], evaluation.PendingHrChecks ?? [], "source-grade-service",
-                $"{minimumYears} years"),
-            new("qualification", qualificationStatus, requiredQualification),
-            new("recognised-institution", qualificationStatus),
-            new("relevant-field", qualificationStatus),
-            new("satisfactory-appraisal", appraisalStatus)
+            new("time-in-source-grade", tenureStatus, tenureDetail),
+            new("qualification", qualificationStatus, requiredLevel)
         ];
+    }
+
+    private static async Task<PromotionStatusResponse> LiveCheckWithoutCatalogGradeAsync(
+        SpmeDbContext db,
+        Employee employee,
+        EmploymentRecord? employment,
+        string staffCategory,
+        PromotionCycle cycle,
+        PromotionGradeRef? currentGrade,
+        DateTime? appointmentDate,
+        DateTime? lastPromotionDate,
+        DateTime employmentEffectiveFrom,
+        CancellationToken cancellationToken)
+    {
+        return await LiveInformationalStatusAsync(
+            db, employee, employment, staffCategory, cycle, currentGrade, null,
+            appointmentDate, lastPromotionDate, employmentEffectiveFrom, cancellationToken);
+    }
+
+    private static async Task<PromotionStatusResponse> LiveCheckWithoutMatchingPathAsync(
+        SpmeDbContext db,
+        Employee employee,
+        EmploymentRecord? employment,
+        string staffCategory,
+        PromotionCycle cycle,
+        PromotionGradeRef? currentGrade,
+        Guid sourceGradeId,
+        DateTime? appointmentDate,
+        DateTime? lastPromotionDate,
+        DateTime employmentEffectiveFrom,
+        CancellationToken cancellationToken)
+    {
+        return await LiveInformationalStatusAsync(
+            db, employee, employment, staffCategory, cycle, currentGrade, sourceGradeId,
+            appointmentDate, lastPromotionDate, employmentEffectiveFrom, cancellationToken);
+    }
+
+    private static async Task<PromotionStatusResponse> LiveInformationalStatusAsync(
+        SpmeDbContext db,
+        Employee employee,
+        EmploymentRecord? employment,
+        string staffCategory,
+        PromotionCycle cycle,
+        PromotionGradeRef? currentGrade,
+        Guid? sourceGradeId,
+        DateTime? appointmentDate,
+        DateTime? lastPromotionDate,
+        DateTime employmentEffectiveFrom,
+        CancellationToken cancellationToken)
+    {
+        var selfReported = await PromotionStatusWindowBuilder.ResolveSelfReportedPromotionDateAsync(
+            db, employee.Id, sourceGradeId, cancellationToken);
+        var presentGradeStart = PromotionPresentGradeStart.Resolve(
+            appointmentDate,
+            employment?.PromotionDate,
+            employmentEffectiveFrom,
+            selfReported);
+        var years = PromotionStaffCheck.InferredMinimumYears(staffCategory, null);
+        var requiredLevel = PromotionStaffCheck.RequiredQualificationFor(staffCategory, null);
+        var educationLevels = await db.EducationRecords.AsNoTracking()
+            .Where(item => item.EmployeeId == employee.Id)
+            .Select(item => item.QualificationLevel)
+            .ToListAsync(cancellationToken);
+        var applicationWindow = await PromotionStatusWindowBuilder.BuildAsync(
+            db,
+            employee.Id,
+            staffCategory,
+            sourceGradeId,
+            appointmentDate,
+            employment?.PromotionDate,
+            employmentEffectiveFrom,
+            null,
+            cancellationToken);
+        var eligibility = string.Equals(staffCategory, PromotionConstants.SeniorMember, StringComparison.OrdinalIgnoreCase)
+            ? PromotionConstants.EligibilityNotApplicable
+            : PromotionConstants.EligibilityNeedsHrReview;
+        string nextAction;
+        if (eligibility == PromotionConstants.EligibilityNotApplicable)
+            nextAction = PromotionStatusMessages.SeniorMemberComingSoon;
+        else if (applicationWindow is { IsOpen: false })
+            nextAction = ClosedWindowMessage(applicationWindow);
+        else if (applicationWindow is { CanPrepareDraft: false })
+            nextAction = PromotionStatusMessages.QualifyingEducationRequired;
+        else
+            nextAction = PromotionStatusMessages.NoMatchingPath;
+
+        return LiveStatus(
+            employee.StaffId, staffCategory, cycle.CycleYear, cycle.EffectivePromotionDate,
+            eligibility,
+            BuildStaffCheckCriteria(presentGradeStart.StartDate, years, educationLevels, requiredLevel, DateTime.UtcNow.Date),
+            nextAction,
+            sourceGradeId, null, currentGrade, null, null,
+            appointmentDate, lastPromotionDate, presentGradeStart.StartDate, applicationWindow, []);
+    }
+
+    internal static async Task<Grade?> ResolveCurrentGradeAsync(
+        SpmeDbContext db,
+        Guid? gradeId,
+        string? jobTitle,
+        string staffCategory,
+        CancellationToken cancellationToken)
+    {
+        if (gradeId is Guid id)
+        {
+            var mapped = await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+            if (mapped is not null)
+                return mapped;
+        }
+
+        if (string.IsNullOrWhiteSpace(jobTitle))
+            return null;
+
+        var name = jobTitle.Trim();
+        return await db.Grades.AsNoTracking()
+            .Where(item => item.IsActive && item.Name == name)
+            .OrderBy(item => item.StaffCategory == staffCategory ? 0 : 1)
+            .ThenBy(item => item.Rank)
+            .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private static PromotionGradeRef? ToGradeRef(Grade? grade, string? jobTitle)
+    {
+        if (grade is not null)
+            return new PromotionGradeRef(grade.Code, grade.Name);
+        if (!string.IsNullOrWhiteSpace(jobTitle))
+            return new PromotionGradeRef("job-title", jobTitle.Trim());
+        return null;
     }
 
     private static string LiveNextAction(
@@ -508,16 +613,20 @@ internal static class PromotionEndpoints
         string staffCategory,
         PromotionApplicationWindowResponse? applicationWindow = null)
     {
-        if (applicationWindow?.CanPrepareDraft == true &&
+        if (applicationWindow?.CanPrepareDraft == true)
+            return PromotionStatusMessages.PrepareDraftSubmission;
+
+        if (applicationWindow is { IsOpen: true } &&
             evaluation.EligibilityState != PromotionConstants.EligibilityEligibleForReview)
         {
-            return PromotionStatusMessages.PrepareDraftSubmission;
+            return PromotionStatusMessages.QualifyingEducationRequired;
         }
 
         if (applicationWindow is { IsOpen: false } &&
-            evaluation.EligibilityState == PromotionConstants.EligibilityNotYetEligible)
+            evaluation.EligibilityState is PromotionConstants.EligibilityNotYetEligible
+                or PromotionConstants.EligibilityNeedsHrReview)
         {
-            return PromotionStatusMessages.ApplicationWindowClosed;
+            return ClosedWindowMessage(applicationWindow);
         }
 
         return evaluation.EligibilityState switch
@@ -564,7 +673,8 @@ internal static class PromotionEndpoints
                                          employment.PromotionDate,
                                          employment.EffectiveFrom,
                                          employment.StaffCategory,
-                                         employment.GradeId
+                                         employment.GradeId,
+                                         employment.JobTitle
                                      })
             .FirstOrDefaultAsync(ct);
         var appointmentDate = employmentDates?.AppointmentDate;
@@ -623,10 +733,16 @@ internal static class PromotionEndpoints
         var targetGrade = status.TargetGradeId is Guid targetId
             ? await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == targetId, ct)
             : null;
-        var blocking = DeserializeStrings(assessment.BlockingReasonsJson);
-        var pending = DeserializeStrings(assessment.PendingHrChecksJson);
         var eligibility = status.EligibilityState;
-        var currentGrade = sourceGrade is null ? null : new PromotionGradeRef(sourceGrade.Code, sourceGrade.Name);
+        var currentGrade = sourceGrade is not null
+            ? new PromotionGradeRef(sourceGrade.Code, sourceGrade.Name)
+            : ToGradeRef(null, employmentDates?.JobTitle);
+        var educationLevels = employmentDates is null
+            ? []
+            : await db.EducationRecords.AsNoTracking()
+                .Where(item => item.EmployeeId == employmentDates.Id)
+                .Select(item => item.QualificationLevel)
+                .ToListAsync(ct);
         var nextPromotion = path is not null && targetGrade is not null &&
             eligibility is not PromotionConstants.EligibilityNotApplicable
             ? new PromotionNextPromotion(path.Code, path.SectionReference,
@@ -636,24 +752,12 @@ internal static class PromotionEndpoints
         var affectedSection = eligibility == PromotionConstants.EligibilityPolicyAmbiguity
             ? path?.SectionReference
             : null;
-        var snapshot = TryReadEvaluation(assessment.EligibilitySnapshotJson);
-        var criteria = snapshot is not null
-            ? BuildCriteria(snapshot, path?.MinimumYearsInSourceGrade ?? 0, path?.RequiredQualificationLevel, status.StaffCategory).ToList()
-            : eligibility == PromotionConstants.EligibilityNotApplicable
-            ? new List<PromotionStatusCriterion>
-            {
-                new("staff-category", "not-met", status.StaffCategory)
-            }
-            : new List<PromotionStatusCriterion>
-            {
-                new("staff-category", "satisfied", status.StaffCategory),
-                Criterion("time-in-source-grade", blocking, pending, "source-grade-service",
-                    path is null ? null : $"{path.MinimumYearsInSourceGrade} years"),
-                Criterion("qualification", blocking, pending, "qualification", path?.RequiredQualificationLevel),
-                Criterion("recognised-institution", blocking, pending, "qualification"),
-                Criterion("relevant-field", blocking, pending, "qualification"),
-                Criterion("satisfactory-appraisal", blocking, pending, "satisfactory-appraisal")
-            };
+        var criteria = BuildStaffCheckCriteria(
+            assessment.SourceGradeEffectiveDate,
+            path?.MinimumYearsInSourceGrade ?? PromotionStaffCheck.InferredMinimumYears(status.StaffCategory, null),
+            educationLevels,
+            path?.RequiredQualificationLevel ?? PromotionStaffCheck.RequiredQualificationFor(status.StaffCategory, null),
+            DateTime.UtcNow.Date).ToList();
 
         var actions = new List<string>();
         var submissionStatus = status.PromotionSubmissionStatus;
@@ -662,13 +766,13 @@ internal static class PromotionEndpoints
             actions.Add("start-promotion-submission");
 
         PromotionApplicationWindowResponse? applicationWindow = null;
-        if (employmentDates?.GradeId is Guid sourceGradeId && path is not null)
+        if (employmentDates is not null)
         {
             applicationWindow = await PromotionStatusWindowBuilder.BuildAsync(
                 db,
                 employmentDates.Id,
                 employmentDates.StaffCategory,
-                sourceGradeId,
+                employmentDates.GradeId ?? sourceGrade?.Id,
                 employmentDates.AppointmentDate,
                 employmentDates.PromotionDate,
                 employmentDates.EffectiveFrom,
@@ -698,7 +802,7 @@ internal static class PromotionEndpoints
             PromotionConstants.EligibilityNotYetEligible when applicationWindow?.CanPrepareDraft == true =>
                 PromotionStatusMessages.PrepareDraftSubmission,
             PromotionConstants.EligibilityNotYetEligible when applicationWindow is { IsOpen: false } =>
-                PromotionStatusMessages.ApplicationWindowClosed,
+                ClosedWindowMessage(applicationWindow),
             PromotionConstants.EligibilityNotYetEligible when assessment.ServiceRequirementMetOn is DateTime metOn =>
                 PromotionStatusMessages.NotYetEligible(path?.MinimumYearsInSourceGrade ?? 0, metOn, status.CycleYear),
             PromotionConstants.EligibilityNeedsHrReview when applicationWindow?.CanPrepareDraft == true =>
@@ -716,7 +820,7 @@ internal static class PromotionEndpoints
             Criteria = criteria,
             AvailableActions = actions,
             NextAction = nextAction,
-            CurrentGrade = currentGrade,
+            CurrentGrade = currentGrade ?? status.CurrentGrade,
             NextPromotion = nextPromotion,
             AffectedPolicySection = affectedSection,
             AppointmentDate = appointmentDate,
@@ -726,27 +830,10 @@ internal static class PromotionEndpoints
         };
     }
 
-    private static PromotionStatusCriterion Criterion(
-        string code, IReadOnlyList<string> blocking, IReadOnlyList<string> pending, string reasonCode, string? required = null)
-    {
-        if (blocking.Contains(reasonCode, StringComparer.OrdinalIgnoreCase))
-            return new(code, "not-met", required);
-        if (pending.Contains(reasonCode, StringComparer.OrdinalIgnoreCase))
-            return new(code, "pending-hr-review", required);
-        return new(code, "satisfied", required);
-    }
-
-    private static IReadOnlyList<string> DeserializeStrings(string json)
-    {
-        try
-        {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
-        }
-        catch (JsonException)
-        {
-            return [];
-        }
-    }
+    private static string ClosedWindowMessage(PromotionApplicationWindowResponse? window) =>
+        window is null
+            ? PromotionStatusMessages.ApplicationWindowClosed
+            : PromotionStatusMessages.ApplicationWindowClosedOn(window.OpensOn, window.ServiceDueOn);
 
     private static Guid? CurrentInstituteId(HttpContext context) =>
         Guid.TryParse(context.User.FindFirstValue("institute_id"), out var instituteId) ? instituteId : null;
