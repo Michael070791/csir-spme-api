@@ -7,7 +7,8 @@ namespace Csir.Spme.Application.Promotions;
 
 public sealed class PromotionReportService
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int LegacySchemaVersion = 1;
+    private const int Form2SchemaVersion = 2;
     private const int MaximumSections = 100;
     private const int MaximumContentBytes = 1_048_576;
 
@@ -55,7 +56,8 @@ public sealed class PromotionReportService
         CancellationToken ct)
     {
         var aggregate = await FindAsync(promotionSubmissionId, reportType, ct);
-        if (aggregate is null || _currentUser.EmployeeId != aggregate.Submission.EmployeeId)
+        if (aggregate is null || _currentUser.EmployeeId != aggregate.Submission.EmployeeId ||
+            !IsStaffWritableReport(reportType, aggregate.Submission.Status))
         {
             return Result<PromotionReportDto>.Failure(Error.NotFound("Promotion report not found."));
         }
@@ -66,7 +68,7 @@ public sealed class PromotionReportService
                 "An If-Match header containing the current promotion report ETag is required."));
         }
 
-        var validation = Validate(command);
+        var validation = Validate(reportType, command, aggregate.Report.ContentJson);
         if (validation.Count > 0)
         {
             return Result<PromotionReportDto>.Failure(Error.Validation(validation));
@@ -74,10 +76,11 @@ public sealed class PromotionReportService
 
         var contentJson = JsonSerializer.Serialize(command.Content, SerializerOptions);
         var before = $"status={aggregate.Report.Status};title={aggregate.Report.Title}";
-        var replaced = aggregate.Report.ReplaceDraft(
+        var replaced = aggregate.Report.ReplaceWorkflowDraft(
             command.Title.Trim(),
             contentJson,
             aggregate.Submission.Status,
+            reportType,
             DateTimeOffset.UtcNow);
         if (replaced.IsFailure)
         {
@@ -140,7 +143,110 @@ public sealed class PromotionReportService
              _currentUser.InstituteId.Value == aggregate.Submission.InstituteId);
     }
 
-    private static Dictionary<string, string[]> Validate(ReplacePromotionReportCommand command)
+    public async Task<Result<PromotionReportDto>> ReplaceWorkflowAsync(
+        Guid promotionSubmissionId,
+        string reportType,
+        ReplacePromotionReportCommand command,
+        byte[]? expectedRowVersion,
+        Func<PromotionReportAggregate, bool> authorize,
+        CancellationToken ct)
+    {
+        var aggregate = await FindAsync(promotionSubmissionId, reportType, ct);
+        if (aggregate is null || !authorize(aggregate))
+        {
+            return Result<PromotionReportDto>.Failure(Error.NotFound("Promotion report not found."));
+        }
+
+        if (expectedRowVersion is null)
+        {
+            return Result<PromotionReportDto>.Failure(Error.PreconditionFailed(
+                "An If-Match header containing the current promotion report ETag is required."));
+        }
+
+        var validation = Validate(reportType, command, aggregate.Report.ContentJson);
+        if (validation.Count > 0)
+        {
+            return Result<PromotionReportDto>.Failure(Error.Validation(validation));
+        }
+
+        var contentJson = JsonSerializer.Serialize(command.Content, SerializerOptions);
+        var before = $"status={aggregate.Report.Status};title={aggregate.Report.Title}";
+        var replaced = aggregate.Report.ReplaceWorkflowDraft(
+            command.Title.Trim(),
+            contentJson,
+            aggregate.Submission.Status,
+            reportType,
+            DateTimeOffset.UtcNow);
+        if (replaced.IsFailure)
+        {
+            return Result<PromotionReportDto>.Failure(replaced.Error!);
+        }
+
+        _unitOfWork.SetOriginalRowVersion(aggregate.Report, expectedRowVersion);
+        try
+        {
+            await _audit.RecordAsync(
+                "promotion-submission.report.saved",
+                "PromotionSubmissionReport",
+                aggregate.Report.Id.ToString(),
+                before,
+                $"status={aggregate.Report.Status};title={aggregate.Report.Title}",
+                ct);
+            await _unitOfWork.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            return Result<PromotionReportDto>.Failure(Error.PreconditionFailed(
+                "The promotion report was modified by another request. Reload it and retry."));
+        }
+
+        return Map(aggregate.Report);
+    }
+
+    private static bool IsStaffWritableReport(string reportType, string submissionStatus)
+    {
+        if (reportType is "hod-assessment" or "director-assessment")
+            return false;
+
+        if (string.Equals(reportType, "applicant-hod-response", StringComparison.OrdinalIgnoreCase))
+        {
+            return submissionStatus is
+                Csir.Spme.Domain.Promotions.PromotionConstants.SubmissionSubmitted or
+                Csir.Spme.Domain.Promotions.PromotionConstants.SubmissionUnderReview or
+                Csir.Spme.Domain.Promotions.PromotionConstants.SubmissionAcknowledged;
+        }
+
+        return true;
+    }
+
+    private static Dictionary<string, string[]> Validate(
+        string reportType,
+        ReplacePromotionReportCommand command,
+        string existingContentJson)
+    {
+        var fields = ValidateStructure(command);
+        if (fields.Count > 0 || command.Content is null)
+            return fields;
+
+        if (command.Content.SchemaVersion == LegacySchemaVersion)
+            return fields;
+
+        fields = Merge(fields, PromotionForm2ReportValidator.Validate(
+            reportType,
+            command.Content.SchemaVersion,
+            command.Content.Sections));
+
+        if (reportType == "particulars" && command.Content.Sections.Count == 1)
+        {
+            fields = Merge(fields, PromotionForm2ReportValidator.ValidateStaffParticularsOverrides(
+                command.Content.Sections[0].Content,
+                TryReadSectionContent(existingContentJson)));
+        }
+
+        return fields;
+    }
+
+    private static Dictionary<string, string[]> ValidateStructure(ReplacePromotionReportCommand command)
     {
         var fields = new Dictionary<string, string[]>();
         if (string.IsNullOrWhiteSpace(command.Title) || command.Title.Length > 512)
@@ -154,10 +260,10 @@ public sealed class PromotionReportService
             return fields;
         }
 
-        if (command.Content.SchemaVersion != CurrentSchemaVersion)
+        if (command.Content.SchemaVersion is not (LegacySchemaVersion or Form2SchemaVersion))
         {
             fields["content.schemaVersion"] =
-                [$"Schema version must be {CurrentSchemaVersion}."];
+                [$"Schema version must be {LegacySchemaVersion} or {Form2SchemaVersion}."];
         }
 
         if (command.Content.Sections is null)
@@ -171,7 +277,7 @@ public sealed class PromotionReportService
             fields["content.sections"] =
                 [$"A promotion report cannot contain more than {MaximumSections} sections."];
         }
-        if (command.Content.Sections.Count == 0)
+        if (command.Content.Sections.Count == 0 && command.Content.SchemaVersion == LegacySchemaVersion)
         {
             fields["content.sections"] = ["At least one structured report section is required."];
         }
@@ -220,6 +326,35 @@ public sealed class PromotionReportService
         return fields;
     }
 
+    private static Dictionary<string, string[]> Merge(
+        Dictionary<string, string[]> left,
+        Dictionary<string, string[]> right)
+    {
+        foreach (var entry in right)
+            left[entry.Key] = entry.Value;
+        return left;
+    }
+
+    private static JsonElement? TryReadSectionContent(string contentJson)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(contentJson);
+            if (!document.RootElement.TryGetProperty("sections", out var sections) ||
+                sections.ValueKind != JsonValueKind.Array ||
+                sections.GetArrayLength() == 0)
+            {
+                return null;
+            }
+
+            return sections[0].TryGetProperty("content", out var content) ? content.Clone() : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private static Result<PromotionReportDto> Map(
         Csir.Spme.Domain.Promotions.PromotionSubmissionReport report)
     {
@@ -243,7 +378,7 @@ public sealed class PromotionReportService
             if (report.ContentJson.Trim() == "{}")
             {
                 content = new PromotionReportContentDto(
-                    CurrentSchemaVersion,
+                    LegacySchemaVersion,
                     Array.Empty<PromotionReportSectionDto>());
             }
             else

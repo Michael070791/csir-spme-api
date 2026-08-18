@@ -369,7 +369,8 @@ public sealed class PromotionSubmissionReport : BaseEntity
         Guid requirementSnapshotId,
         string reportType,
         string title,
-        DateTimeOffset createdAt)
+        DateTimeOffset createdAt,
+        string? initialContentJson = null)
     {
         if (promotionSubmissionId == Guid.Empty || requirementSnapshotId == Guid.Empty)
         {
@@ -395,7 +396,7 @@ public sealed class PromotionSubmissionReport : BaseEntity
             RequirementSnapshotId = requirementSnapshotId,
             ReportType = reportType.Trim(),
             Title = title.Trim(),
-            ContentJson = EmptyStructuredContent,
+            ContentJson = string.IsNullOrWhiteSpace(initialContentJson) ? EmptyStructuredContent : initialContentJson,
             Status = PromotionConstants.SubmissionReportDraft,
             LastSavedAt = createdAt
         });
@@ -433,6 +434,44 @@ public sealed class PromotionSubmissionReport : BaseEntity
             return Result<bool>.Failure(Error.Validation(
                 "Structured report content is required."));
         }
+
+        Title = title.Trim();
+        ContentJson = contentJson;
+        Status = PromotionConstants.SubmissionReportReady;
+        LastSavedAt = savedAt;
+        FinalizedAt = null;
+        return Result.Success();
+    }
+
+    public Result<bool> ReplaceWorkflowDraft(
+        string title,
+        string contentJson,
+        string submissionStatus,
+        string reportType,
+        DateTimeOffset savedAt)
+    {
+        var workflowTypes = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "hod-assessment", "director-assessment", "applicant-hod-response"
+        };
+        if (!workflowTypes.Contains(reportType))
+            return ReplaceDraft(title, contentJson, submissionStatus, savedAt);
+
+        if (submissionStatus is not (
+            PromotionConstants.SubmissionSubmitted or
+            PromotionConstants.SubmissionUnderReview or
+            PromotionConstants.SubmissionAcknowledged or
+            PromotionConstants.SubmissionDraft or
+            PromotionConstants.SubmissionReturned))
+        {
+            return Result<bool>.Failure(Error.Conflict(
+                "Promotion workflow reports can be edited only while the submission remains active."));
+        }
+
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 512)
+            return Result<bool>.Failure(Error.Validation("A title of at most 512 characters is required."));
+        if (string.IsNullOrWhiteSpace(contentJson))
+            return Result<bool>.Failure(Error.Validation("Structured report content is required."));
 
         Title = title.Trim();
         ContentJson = contentJson;

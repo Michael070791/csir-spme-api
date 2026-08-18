@@ -10,6 +10,8 @@ using Csir.Spme.Application.Hr;
 using Csir.Spme.Application.Promotions;
 using Csir.Spme.Domain.Common;
 using Csir.Spme.Domain.Comms;
+using Csir.Spme.Domain.Hr;
+using Csir.Spme.Domain.Org;
 using Csir.Spme.Domain.Promotions;
 using Csir.Spme.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -141,13 +143,18 @@ internal static class PromotionSubmissionEndpoints
         IAuditService audit, HttpContext context, CancellationToken ct)
     {
         if (!TryIdentity(context, out var userId, out var employeeId)) return NotFound();
-        var assessment = await db.PromotionAssessments.SingleOrDefaultAsync(x =>
-            x.Id == request.PromotionAssessmentId && x.EmployeeId == employeeId, ct);
-        if (assessment is null) return NotFound();
+        var resolution = await PromotionSubmissionPreparation.ResolveForCreateAsync(
+            db, employeeId, request.PromotionAssessmentId, ct);
+        if (resolution.FailureKind == "not-found")
+            return NotFound();
+        if (resolution.Assessment is null)
+            return EndpointProblems.FromError(Error.Conflict(resolution.FailureKind ?? "Promotion submission cannot be created."));
+        var assessment = resolution.Assessment;
+        if (!resolution.CanCreate)
+            return EndpointProblems.FromError(Error.Conflict(
+                "Only an eligible-for-review assessment or an open CSIR FORM 2 preparation window can create a promotion submission."));
         var existing = await db.PromotionSubmissions.SingleOrDefaultAsync(x => x.PromotionAssessmentId == assessment.Id, ct);
         if (existing is not null) return await ResourceAsync(db, existing, context, ct);
-        if (assessment.EligibilityState != PromotionConstants.EligibilityEligibleForReview || !assessment.TargetGradeId.HasValue)
-            return EndpointProblems.FromError(Error.Conflict("Only an eligible-for-review assessment can create a promotion submission."));
         var cycle = await db.PromotionCycles.AsNoTracking().SingleOrDefaultAsync(x => x.Id == assessment.PromotionCycleId, ct);
         if (cycle?.Status != PromotionConstants.CycleOpen)
             return EndpointProblems.FromError(Error.Conflict("The promotion cycle is not open."));
@@ -161,14 +168,18 @@ internal static class PromotionSubmissionEndpoints
         var templates = templateCandidates.Where(x => x.EffectiveFrom <= now &&
                 (!x.EffectiveTo.HasValue || x.EffectiveTo > now))
             .OrderBy(x => x.DisplayOrder).ToList();
+        var prefillContext = await TryBuildForm2PrefillContextAsync(db, employeeId, assessment, ct);
         foreach (var template in templates)
         {
             var snapshot = new PromotionSubmissionRequirementSnapshot(submission.Id, template);
             db.PromotionSubmissionRequirementSnapshots.Add(snapshot);
             if (template.RequirementType == PromotionConstants.RequirementReport)
             {
+                var initialContent = prefillContext is null
+                    ? null
+                    : ResolveInitialReportContent(template.ReportTemplateCode ?? template.Code, prefillContext);
                 var report = PromotionSubmissionReport.CreateDraft(submission.Id, snapshot.Id,
-                    template.ReportTemplateCode ?? template.Code, template.Title, now);
+                    template.ReportTemplateCode ?? template.Code, template.Title, now, initialContent);
                 if (report.IsFailure) return EndpointProblems.FromError(report.Error!);
                 db.PromotionSubmissionReports.Add(report.Value!);
             }
@@ -707,6 +718,87 @@ internal static class PromotionSubmissionEndpoints
             signature.StartsWith(new byte[] { 0x50, 0x4B, 0x03, 0x04 }),
         _ => false
     };
+    private static async Task<Form2PrefillContext?> TryBuildForm2PrefillContextAsync(
+        SpmeDbContext db,
+        Guid employeeId,
+        PromotionAssessment assessment,
+        CancellationToken ct)
+    {
+        var employee = await db.Employees.AsNoTracking().SingleOrDefaultAsync(item => item.Id == employeeId, ct);
+        var employment = await db.EmploymentRecords.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.EmployeeId == employeeId && item.IsCurrent, ct);
+        var sourceGrade = await db.Grades.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == assessment.SourceGradeId, ct);
+        if (employee is null || employment is null || sourceGrade is null)
+            return null;
+
+        var targetGrade = assessment.TargetGradeId is Guid targetId
+            ? await db.Grades.AsNoTracking().SingleOrDefaultAsync(item => item.Id == targetId, ct)
+            : null;
+        var institute = await db.Institutes.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == employee.InstituteId, ct);
+        if (institute is null)
+            return null;
+        var selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId && item.GradeId == assessment.SourceGradeId)
+            .Select(item => (DateTime?)item.PromotionDate)
+            .FirstOrDefaultAsync(ct);
+        var presentGradeStart = PromotionPresentGradeStart.Resolve(
+            employment.AppointmentDate,
+            employment.PromotionDate,
+            employment.EffectiveFrom,
+            selfReportedPromotionDate);
+        var education = await db.EducationRecords.AsNoTracking()
+            .Where(item => item.EmployeeId == employeeId)
+            .ToListAsync(ct);
+        return new Form2PrefillContext(
+            employee,
+            employment,
+            sourceGrade,
+            targetGrade,
+            institute,
+            PromotionStatusWindowBuilder.ResolveRecordedLastPromotionDate(
+                employment.AppointmentDate,
+                employment.PromotionDate,
+                employment.EffectiveFrom,
+                selfReportedPromotionDate),
+            presentGradeStart.Source ?? PromotionPresentGradeStart.SourceFirstAppointment,
+            education);
+    }
+
+    private static string? ResolveInitialReportContent(string reportType, Form2PrefillContext context) =>
+        reportType switch
+        {
+            "particulars" => PromotionForm2Prefill.BuildParticularsContent(
+                context.Employee,
+                context.Employment,
+                context.SourceGrade,
+                context.TargetGrade,
+                context.Institute,
+                context.RecordedLastPromotionDate,
+                context.PresentGradeStartSource),
+            "qualifications" => PromotionForm2Prefill.BuildQualificationsContent(context.Education),
+            "training" => PromotionForm2Prefill.BuildEmptyTrainingContent(),
+            "service-duties" => PromotionForm2Prefill.BuildEmptyServiceDutiesContent(),
+            "hod-assessment" => PromotionForm2Prefill.BuildEmptyWorkflowContent(
+                "hod-assessment", "Head of Division/Section assessment"),
+            "applicant-hod-response" => PromotionForm2Prefill.BuildEmptyWorkflowContent(
+                "applicant-hod-response", "Applicant comments on HOD recommendation"),
+            "director-assessment" => PromotionForm2Prefill.BuildEmptyWorkflowContent(
+                "director-assessment", "Director assessment"),
+            _ => null
+        };
+
+    private sealed record Form2PrefillContext(
+        Employee Employee,
+        EmploymentRecord Employment,
+        Grade SourceGrade,
+        Grade? TargetGrade,
+        Institute Institute,
+        DateTime? RecordedLastPromotionDate,
+        string PresentGradeStartSource,
+        IReadOnlyList<EducationRecord> Education);
+
     private static byte[] BuildPdf(string title, string content)
     {
         static string Safe(string value) => value.Replace("\\", "\\\\", StringComparison.Ordinal)
@@ -728,7 +820,7 @@ internal static class PromotionSubmissionEndpoints
     }
 }
 
-public sealed record CreatePromotionSubmissionRequest(Guid PromotionAssessmentId);
+public sealed record CreatePromotionSubmissionRequest(Guid? PromotionAssessmentId = null);
 public sealed record UpdatePromotionSubmissionRequest(string? EmployeeNote);
 public sealed record PromotionDecisionRequest(string? EmployeeVisibleNote, string? InternalNote);
 public sealed record CreatePromotionDocumentUploadRequest(string RequirementCode, string FileName,

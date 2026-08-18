@@ -28,6 +28,12 @@ public static class PromotionStatusMessages
     public const string EligibleStartSubmission =
         "Start a promotion submission for this cycle.";
 
+    public const string PrepareDraftSubmission =
+        "You may complete and save CSIR FORM 2 as a draft. Submission for HR review opens when your promotion cycle eligibility is confirmed.";
+
+    public const string ApplicationWindowClosed =
+        "Your CSIR FORM 2 application window opens on the date shown below.";
+
     public const string EligibleCompleteRequirements =
         "Complete the required reports, documents, and declarations.";
 

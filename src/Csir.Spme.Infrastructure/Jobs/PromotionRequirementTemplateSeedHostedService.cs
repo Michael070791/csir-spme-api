@@ -71,11 +71,43 @@ public sealed class PromotionRequirementTemplateSeedHostedService : IHostedServi
         if (created == 0)
         {
             _logger.LogInformation("Promotion requirement templates already present for active cycle/path pairs.");
-            return;
+        }
+        else
+        {
+            await db.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Seeded Senior Staff promotion requirement templates for {Count} cycle/path pairs.", created);
         }
 
+        var workflowAdded = 0;
+        foreach (var cycle in cycles)
+        {
+            foreach (var path in paths)
+            {
+                var existingCodes = await db.PromotionSubmissionRequirementTemplates.AsNoTracking()
+                    .Where(template => template.PromotionCycleId == cycle.Id && template.PromotionPathId == path.Id)
+                    .Select(template => template.Code)
+                    .ToListAsync(cancellationToken);
+                foreach (var definition in DefaultTemplates().Where(item =>
+                             item.Code is "hod-assessment" or "applicant-hod-response" or "director-assessment"))
+                {
+                    if (existingCodes.Contains(definition.Code, StringComparer.OrdinalIgnoreCase))
+                        continue;
+
+                    db.PromotionSubmissionRequirementTemplates.Add(new PromotionSubmissionRequirementTemplate(
+                        cycle.Id, path.Id, definition.Code, definition.Type, definition.Title, definition.Required,
+                        definition.DisplayOrder, definition.Description, definition.DeclarationText,
+                        definition.ReportTemplateCode, definition.AcceptedContentTypesJson,
+                        definition.MaximumFileBytes, definition.MaximumDocumentCount));
+                    workflowAdded++;
+                }
+            }
+        }
+
+        if (workflowAdded == 0)
+            return;
+
         await db.SaveChangesAsync(cancellationToken);
-        _logger.LogInformation("Seeded Senior Staff promotion requirement templates for {Count} cycle/path pairs.", created);
+        _logger.LogInformation("Added CSIR FORM 2 workflow templates for {Count} cycle/path pairs.", workflowAdded);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -101,7 +133,13 @@ public sealed class PromotionRequirementTemplateSeedHostedService : IHostedServi
         new("applicant", PromotionConstants.RequirementDeclaration, "Applicant declaration", true, 9,
             null,
             "I confirm that the information and documents submitted in this promotion application are true and complete to the best of my knowledge.",
-            null, null, null, null)
+            null, null, null, null),
+        new("hod-assessment", PromotionConstants.RequirementReport, "Head of Division/Section assessment", true, 10,
+            "Complete Part II after the applicant submits CSIR FORM 2.", null, "hod-assessment", null, null, null),
+        new("applicant-hod-response", PromotionConstants.RequirementReport, "Applicant comments on HOD recommendation", false, 11,
+            "Optional applicant comments after the HOD recommendation is recorded.", null, "applicant-hod-response", null, null, null),
+        new("director-assessment", PromotionConstants.RequirementReport, "Director assessment", true, 12,
+            "Complete Part III after the HOD assessment is recorded.", null, "director-assessment", null, null, null)
     ];
 
     private sealed record TemplateDefinition(

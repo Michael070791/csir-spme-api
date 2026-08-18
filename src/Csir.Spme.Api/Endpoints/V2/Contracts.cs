@@ -1102,6 +1102,14 @@ public sealed record PromotionNextPromotion(
     string PathCode, string PolicySection, PromotionGradeRef TargetGrade, short MinimumYearsInSourceGrade,
     DateTime? ServiceRequirementMetOn);
 
+public sealed record PromotionApplicationWindowResponse(
+    DateTime OpensOn,
+    DateTime ServiceDueOn,
+    DateTime PresentGradeStart,
+    string PresentGradeStartSource,
+    bool IsOpen,
+    bool CanPrepareDraft);
+
 public sealed record PromotionStatusResponse(
     string StaffId, string StaffCategory, short CycleYear, DateTime EffectivePromotionDate, string AssessmentState,
     string? EligibilityState, string? PromotionSubmissionStatus, Guid? LatestAssessmentId,
@@ -1114,7 +1122,8 @@ public sealed record PromotionStatusResponse(
     string? AffectedPolicySection = null,
     DateTime? AppointmentDate = null,
     DateTime? LastPromotionDate = null,
-    DateTime? SourceGradeEffectiveDate = null);
+    DateTime? SourceGradeEffectiveDate = null,
+    PromotionApplicationWindowResponse? ApplicationWindow = null);
 
 public sealed record PromotionStatusLookupRequest(
     [property: Required, StringLength(64)] string StaffId,

@@ -119,6 +119,8 @@ internal static class PromotionReportEndpoints
         return ConcurrencyToken.TryParse(ifMatch, out var rowVersion) ? rowVersion : null;
     }
 
+    internal static PromotionReportResponse MapPublic(PromotionReportDto report) => Map(report);
+
     private static PromotionReportResponse Map(PromotionReportDto report) => new(
         report.Id,
         report.PromotionSubmissionId,
