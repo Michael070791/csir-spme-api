@@ -228,7 +228,6 @@ internal sealed partial class LegacyImporter
                 row.NewYearEndDate,
                 row.AvailabilityStartDate,
                 row.AvailabilityEndDate,
-                checked((short)row.DeductionDays),
                 status,
                 LegacyValueParser.ParseDateTimeOffset(row.FinalizedAt),
                 finalizedBy,
