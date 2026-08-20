@@ -27,6 +27,7 @@ internal static class PromotionFormAssessmentEndpoints
             .RequireAuthorization(AuthorizationPolicies.WritePromotions)
             .WithName("PromotionSubmissions_ReplaceHodAssessment")
             .WithSummary("Replace the HOD CSIR FORM 2 assessment.")
+            .WithDescription("Fully replaces the structured HOD assessment for a submission in the caller's institute while it is submitted, under review, or acknowledged. The request must include the current report ETag in If-Match, and inaccessible submissions are represented as not found.")
             .Produces<PromotionReportResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status412PreconditionFailed);
@@ -42,6 +43,7 @@ internal static class PromotionFormAssessmentEndpoints
             .RequireAuthorization(AuthorizationPolicies.WritePromotions)
             .WithName("PromotionSubmissions_ReplaceDirectorAssessment")
             .WithSummary("Replace the Director CSIR FORM 2 assessment.")
+            .WithDescription("Fully replaces the structured Director assessment for a submission in the caller's institute while it is submitted, under review, or acknowledged. The request must include the current report ETag in If-Match, and inaccessible submissions are represented as not found.")
             .Produces<PromotionReportResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status412PreconditionFailed);
@@ -56,6 +58,7 @@ internal static class PromotionFormAssessmentEndpoints
             .RequireAuthorization(AuthorizationPolicies.WriteOwnPromotionReports)
             .WithName("PromotionSubmissions_ReplaceApplicantHodResponse")
             .WithSummary("Replace the applicant response to the HOD recommendation.")
+            .WithDescription("Fully replaces the authenticated applicant's structured response to the HOD recommendation while the submission is submitted, under review, or acknowledged. The request must include the current report ETag in If-Match, and another employee's submission is represented as not found.")
             .Produces<PromotionReportResponse>(StatusCodes.Status200OK)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status412PreconditionFailed);
