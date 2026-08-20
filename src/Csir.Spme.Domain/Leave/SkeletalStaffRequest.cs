@@ -15,8 +15,6 @@ public class SkeletalStaffRequest : InstituteScopedEntity
     public string? SignatureName { get; private set; }
     public DateTimeOffset? SubmittedAt { get; private set; }
     public DateTimeOffset? CompletedAt { get; private set; }
-    public short? LeaveCreditYear { get; private set; }
-    public DateTimeOffset? LeaveCreditedAt { get; private set; }
     public string? Comment { get; private set; }
     public string? RejectionReason { get; private set; }
 
@@ -33,9 +31,9 @@ public class SkeletalStaffRequest : InstituteScopedEntity
         string? comment)
     {
         if (employeeId == Guid.Empty || instituteId == Guid.Empty || holidayPeriodId == Guid.Empty ||
-            string.IsNullOrWhiteSpace(selectedDatesJson) || string.IsNullOrWhiteSpace(signatureName))
+            selectedEndDate.Date < selectedStartDate.Date || string.IsNullOrWhiteSpace(signatureName))
         {
-            return Result<SkeletalStaffRequest>.Failure(Error.Validation("Employee, holiday period, selected dates, and signature are required."));
+            return Result<SkeletalStaffRequest>.Failure(Error.Validation("Employee, holiday period, service period, and signature are required."));
         }
 
         return Result<SkeletalStaffRequest>.Success(new SkeletalStaffRequest
@@ -62,9 +60,9 @@ public class SkeletalStaffRequest : InstituteScopedEntity
             return Result.Failure(Error.StateTransition("Only draft skeletal staff requests can be edited."));
         }
 
-        if (string.IsNullOrWhiteSpace(selectedDatesJson) || string.IsNullOrWhiteSpace(signatureName))
+        if (selectedEndDate.Date < selectedStartDate.Date || string.IsNullOrWhiteSpace(signatureName))
         {
-            return Result.Failure(Error.Validation("Selected dates and signature are required."));
+            return Result.Failure(Error.Validation("Service period and signature are required."));
         }
 
         SelectedDatesJson = selectedDatesJson;
@@ -136,18 +134,6 @@ public class SkeletalStaffRequest : InstituteScopedEntity
 
         Status = SkeletalStaffRequestStatuses.Completed;
         CompletedAt = completedAt;
-        return Result.Success();
-    }
-
-    public Result<bool> CreditLeave(short leaveYear, DateTimeOffset creditedAt)
-    {
-        if (Status != SkeletalStaffRequestStatuses.Completed || LeaveCreditedAt.HasValue)
-        {
-            return Result.Failure(Error.StateTransition("Leave credit can be applied once after the skeletal staff request is completed."));
-        }
-
-        LeaveCreditYear = leaveYear;
-        LeaveCreditedAt = creditedAt;
         return Result.Success();
     }
 

@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.Json;
 using Csir.Spme.Domain.Common;
 using Csir.Spme.Domain.Comms;
 using Csir.Spme.Domain.Constants;
@@ -103,7 +102,7 @@ internal static class DashboardEndpoints
                 x.Status != SkeletalStaffRequestStatuses.Cancelled &&
                 x.Status != SkeletalStaffRequestStatuses.Rejected &&
                 x.Status != SkeletalStaffRequestStatuses.Completed)
-            .Select(x => new { x.Id, x.Status, x.SelectedDatesJson, x.CreatedAt });
+            .Select(x => new { x.Id, x.Status, x.SelectedStartDate, x.SelectedEndDate, x.CreatedAt });
         var skeletal = db.Database.IsSqlite()
             ? (await skeletalQuery.ToListAsync(ct)).OrderByDescending(x => x.CreatedAt).FirstOrDefault()
             : await skeletalQuery.OrderByDescending(x => x.CreatedAt).FirstOrDefaultAsync(ct);
@@ -120,14 +119,8 @@ internal static class DashboardEndpoints
             unreadCount,
             completion,
             skeletal is null ? null : new DashboardSkeletalResponse(skeletal.Id, skeletal.Status,
-                ParseDates(skeletal.SelectedDatesJson), skeletal.CreatedAt),
+                skeletal.SelectedStartDate ?? DateTime.MinValue, skeletal.SelectedEndDate ?? DateTime.MinValue, skeletal.CreatedAt),
             DateTimeOffset.UtcNow));
-    }
-
-    private static IReadOnlyList<DateTime> ParseDates(string json)
-    {
-        try { return JsonSerializer.Deserialize<DateTime[]>(json) ?? []; }
-        catch (JsonException) { return []; }
     }
 }
 
@@ -139,7 +132,7 @@ public sealed record DashboardNextPromotionResponse(DashboardGradeResponse Targe
 public sealed record DashboardPromotionResponse(
     string AssessmentState, string? EligibilityState, string? PromotionSubmissionStatus,
     DashboardNextPromotionResponse? NextPromotion, string NextAction, DateTimeOffset CalculatedAt);
-public sealed record DashboardSkeletalResponse(Guid Id, string Status, IReadOnlyList<DateTime> SelectedDates, DateTimeOffset CreatedAt);
+public sealed record DashboardSkeletalResponse(Guid Id, string Status, DateTime SelectedStartDate, DateTime SelectedEndDate, DateTimeOffset CreatedAt);
 public sealed record StaffDashboardResponse(
     IReadOnlyList<DashboardLeaveBalanceResponse> LeaveBalances,
     DashboardMemoResponse? LatestMemo,

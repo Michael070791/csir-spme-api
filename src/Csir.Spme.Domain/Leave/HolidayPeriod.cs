@@ -14,7 +14,6 @@ public class HolidayPeriod : BaseEntity
     public DateTime NewYearEndDate { get; private set; }
     public DateTime AvailabilityStartDate { get; private set; }
     public DateTime AvailabilityEndDate { get; private set; }
-    public short DeductionDays { get; private set; }
     public string Status { get; private set; } = "draft";
     public DateTimeOffset? FinalizedAt { get; private set; }
     public Guid? FinalizedByUserId { get; private set; }
@@ -32,14 +31,13 @@ public class HolidayPeriod : BaseEntity
         DateTime newYearEndDate,
         DateTime availabilityStartDate,
         DateTime availabilityEndDate,
-        short deductionDays,
         string status,
         string? notes)
     {
         var period = new HolidayPeriod();
         var update = period.Update(
             christmasStartDate, christmasEndDate, newYearStartDate, newYearEndDate,
-            availabilityStartDate, availabilityEndDate, deductionDays, status, notes);
+            availabilityStartDate, availabilityEndDate, status, notes);
         if (update.IsFailure)
         {
             return Result<HolidayPeriod>.Failure(update.Error!);
@@ -69,7 +67,6 @@ public class HolidayPeriod : BaseEntity
         DateTime newYearEndDate,
         DateTime availabilityStartDate,
         DateTime availabilityEndDate,
-        short deductionDays,
         string status,
         string? notes)
     {
@@ -80,9 +77,9 @@ public class HolidayPeriod : BaseEntity
             return Result.Failure(Error.Validation("Holiday period end dates cannot precede start dates."));
         }
 
-        if (deductionDays < 0 || !DomainValues.Contains(HolidayPeriodStatuses.All, status))
+        if (!DomainValues.Contains(HolidayPeriodStatuses.All, status))
         {
-            return Result.Failure(Error.Validation("Holiday period status or deduction days are invalid."));
+            return Result.Failure(Error.Validation("Holiday period status is invalid."));
         }
 
         ChristmasStartDate = christmasStartDate.Date;
@@ -91,7 +88,6 @@ public class HolidayPeriod : BaseEntity
         NewYearEndDate = newYearEndDate.Date;
         AvailabilityStartDate = availabilityStartDate.Date;
         AvailabilityEndDate = availabilityEndDate.Date;
-        DeductionDays = deductionDays;
         Status = status;
         Notes = string.IsNullOrWhiteSpace(notes) ? null : notes.Trim();
         return Result.Success();
@@ -107,7 +103,6 @@ public class HolidayPeriod : BaseEntity
         DateTime newYearEndDate,
         DateTime availabilityStartDate,
         DateTime availabilityEndDate,
-        short deductionDays,
         string status,
         DateTimeOffset? finalizedAt,
         Guid? finalizedByUserId,
@@ -124,7 +119,6 @@ public class HolidayPeriod : BaseEntity
             NewYearEndDate = newYearEndDate.Date,
             AvailabilityStartDate = availabilityStartDate.Date,
             AvailabilityEndDate = availabilityEndDate.Date,
-            DeductionDays = deductionDays,
             Status = status,
             FinalizedAt = finalizedAt,
             FinalizedByUserId = finalizedByUserId,

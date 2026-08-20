@@ -300,8 +300,9 @@ public class DocumentationEndpointTests : IClassFixture<SpmeApiFactory>
         paths.TryGetProperty("/api/v2/skeletal-staff-requests", out var skeletalStaffPath).Should().BeTrue();
         skeletalStaffPath.GetProperty("get").GetProperty("tags")[0].GetString().Should().Be("Leave");
         skeletalStaffPath.GetProperty("post").GetProperty("tags")[0].GetString().Should().Be("Leave");
-        paths.TryGetProperty("/api/v2/skeletal-staff-requests/{id}/allowance-report", out var allowanceReportPath).Should().BeTrue();
-        allowanceReportPath.GetProperty("get").GetProperty("tags")[0].GetString().Should().Be("Leave");
+        paths.TryGetProperty("/api/v2/skeletal-staff-requests/{id}/allowance-report", out _).Should().BeFalse();
+        paths.TryGetProperty("/api/v2/skeletal-staff-requests/{id}/service-report", out var serviceReportPath).Should().BeTrue();
+        serviceReportPath.GetProperty("get").GetProperty("tags")[0].GetString().Should().Be("Leave");
 
         paths.TryGetProperty("/api/v2/employees/{id}/profile-image", out var profileImagePath).Should().BeTrue();
         AssertDocumentedOperation(profileImagePath.GetProperty("get"), "Human Resources");

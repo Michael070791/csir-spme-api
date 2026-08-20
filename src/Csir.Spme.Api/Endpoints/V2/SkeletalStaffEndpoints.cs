@@ -23,7 +23,7 @@ internal static class SkeletalStaffEndpoints
             .WithGroupName("v2")
             .WithTags("Leave")
             .RequireAuthorization()
-            .WithDescription("Authenticated skeletal staff requests record employee availability during an open holiday period, controlled approval decisions, completed service, and one-time annual leave credit eligibility. Monetary allowances are intentionally not calculated until an approved allowance policy exists.")
+            .WithDescription("Authenticated skeletal staff requests record employee enrolment for an open holiday period, controlled approval decisions, completed service, and formal service reporting.")
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -37,7 +37,7 @@ internal static class SkeletalStaffEndpoints
             .Produces<HolidayPeriodResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status404NotFound);
         requests.MapPost("", CreateAsync).RequireAuthorization(AuthorizationPolicies.RequestLeave).WithName("SkeletalStaffRequests_Create")
             .WithSummary("Create an employee-owned skeletal staff draft.")
-            .WithDescription("Creates a draft for the authenticated active employee during an effective open holiday period. Availability must be confirmed, selected dates must be distinct and within the period window, and only one request per employee and period is allowed; the response includes an ETag.")
+            .WithDescription("Creates a draft for the authenticated active employee for the full effective open holiday period. Availability must be confirmed, the service start and end dates are derived from the period, and only one request per employee and period is allowed; the response includes an ETag.")
             .Produces<SkeletalStaffRequestResponse>(StatusCodes.Status201Created).ProducesProblem(StatusCodes.Status409Conflict);
         requests.MapGet("/{id:guid}", GetAsync).RequireAuthorization(AuthorizationPolicies.ReadLeave).WithName("SkeletalStaffRequests_Get")
             .WithSummary("Get a scoped skeletal staff request.")
@@ -45,7 +45,7 @@ internal static class SkeletalStaffEndpoints
             .Produces<SkeletalStaffRequestResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status404NotFound);
         requests.MapPatch("/{id:guid}", UpdateAsync).RequireAuthorization(AuthorizationPolicies.RequestLeave).WithName("SkeletalStaffRequests_Update")
             .WithSummary("Update a draft skeletal staff request with an ETag.")
-            .WithDescription("Updates an accessible employee-owned draft while its holiday period remains open. Availability and selected dates are revalidated, and the current If-Match ETag is required; stale versions return precondition failed and invalid lifecycle state returns conflict.")
+            .WithDescription("Updates the signature, confirmation, and comment on an accessible employee-owned draft while its holiday period remains open. The service dates remain derived from the period, and the current If-Match ETag is required; stale versions return precondition failed and invalid lifecycle state returns conflict.")
             .Produces<SkeletalStaffRequestResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status412PreconditionFailed);
         requests.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization(AuthorizationPolicies.RequestLeave).WithName("SkeletalStaffRequests_Delete")
             .WithSummary("Delete an employee-owned draft with an ETag.")
@@ -71,25 +71,20 @@ internal static class SkeletalStaffEndpoints
             .WithSummary("Confirm approved skeletal staff service is complete.")
             .WithDescription("Marks approved skeletal staff service complete for an institute-scoped HR manager or platform administrator. The current If-Match ETag is required; only the approved lifecycle state can be completed, and inaccessible records use a non-disclosing not-found response.")
             .Produces<SkeletalStaffRequestResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status409Conflict);
-        requests.MapPost("/{id:guid}/credit-leave", CreditLeaveAsync).RequireAuthorization(AuthorizationPolicies.ManageLeave).WithName("SkeletalStaffRequests_CreditLeave")
-            .WithSummary("Apply the holiday period leave credit exactly once.")
-            .WithDescription("Credits the completed employee's annual leave balance for the requested leave year using the holiday period's configured deduction days. Institute-scoped HR or platform management and the current If-Match ETag are required; duplicate or invalid lifecycle credits return conflict.")
-            .Produces<SkeletalStaffRequestResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status409Conflict);
-        requests.MapGet("/{id:guid}/allowance-report", GetAllowanceReportAsync).RequireAuthorization(AuthorizationPolicies.ReadLeave).WithName("SkeletalStaffRequests_GetAllowanceReport")
-            .WithSummary("Generate the completed-service allowance eligibility report.")
-            .WithDescription("Generates a scoped report only after skeletal staff service is completed, including employee, institute, holiday period, approval, and leave-credit status. It records leave-credit eligibility only because no monetary allowance type or rate is configured.")
-            .Produces<SkeletalStaffAllowanceReportResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status409Conflict);
         requests.MapGet("/pending-approvals", ListPendingApprovalsAsync).RequireAuthorization(AuthorizationPolicies.ApproveLeave).WithName("SkeletalStaffRequests_ListPendingApprovals")
             .WithSummary("List skeletal staff requests awaiting the caller's approval stage.")
+            .WithDescription("Lists skeletal staff requests currently awaiting the caller's approval stage within their institute scope, with non-matching stages and inaccessible institute records omitted.")
             .Produces<CollectionResponse<SkeletalStaffRequestResponse>>(StatusCodes.Status200OK);
         requests.MapPost("/{id:guid}/resend-approval", ResendApprovalAsync).RequireAuthorization(AuthorizationPolicies.ApproveLeave).WithName("SkeletalStaffRequests_ResendApproval")
             .WithSummary("Resend the current stage approval notifications and rotate email tokens.")
             .Produces(StatusCodes.Status204NoContent).ProducesProblem(StatusCodes.Status404NotFound);
         requests.MapGet("/{id:guid}/service-report", GetServiceReportAsync).RequireAuthorization(AuthorizationPolicies.ReadLeave).WithName("SkeletalStaffRequests_GetServiceReport")
             .WithSummary("Download the branded skeletal staff service report PDF.")
+            .WithDescription("Downloads a formal per-employee skeletal staff service report only after the holiday period end date and only for approved or completed requests. The PDF includes staff, institute, period, status, comments, and approval trail details.")
             .Produces(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status409Conflict);
         requests.MapPost("/{id:guid}/send-service-report", SendServiceReportAsync).RequireAuthorization(AuthorizationPolicies.RequestLeave).WithName("SkeletalStaffRequests_SendServiceReport")
             .WithSummary("Send the skeletal staff service report to Head of Admin.")
+            .WithDescription("Sends the formal service report PDF to the assigned Head of Admin after the holiday period end date for an employee-owned approved or completed request. Missing Head of Admin assignment returns validation problem details.")
             .Produces(StatusCodes.Status204NoContent).ProducesProblem(StatusCodes.Status409Conflict);
     }
 
@@ -121,11 +116,11 @@ internal static class SkeletalStaffEndpoints
         var institute = await ResolveEffectiveInstituteAsync(context, db, ct);
         if (institute.IsFailure) return EndpointProblems.FromError(institute.Error!);
 
-        var today = DateTime.UtcNow.Date;
         var period = await db.HolidayPeriods.AsNoTracking()
-            .Where(x => x.Status == HolidayPeriodStatuses.Open && x.AvailabilityStartDate <= today && x.AvailabilityEndDate >= today &&
+            .Where(x => x.Status == HolidayPeriodStatuses.Open &&
                 (x.ScopeType == ScopeTypes.CsirWide || (x.ScopeType == ScopeTypes.Institute && x.InstituteId == institute.Value)))
             .OrderByDescending(x => x.ScopeType == ScopeTypes.Institute)
+            .ThenByDescending(x => x.AvailabilityStartDate)
             .FirstOrDefaultAsync(ct);
         return period is null
             ? EndpointProblems.FromError(Error.NotFound("No active holiday period is available."))
@@ -140,14 +135,12 @@ internal static class SkeletalStaffEndpoints
 
         var period = await db.HolidayPeriods.AsNoTracking().FirstOrDefaultAsync(x => x.Id == request.HolidayPeriodId, ct);
         if (period is null || !IsEffectiveOpenPeriod(period, employee.Value!.InstituteId)) return EndpointProblems.FromError(Error.NotFound("Holiday period not found."));
-        var dates = ValidateDates(request.SelectedDates, period);
-        if (dates.IsFailure) return EndpointProblems.FromError(dates.Error!);
         if (await db.SkeletalStaffRequests.AnyAsync(x => x.EmployeeId == employee.Value.EmployeeId && x.HolidayPeriodId == period.Id, ct))
             return EndpointProblems.FromError(Error.Conflict("A skeletal staff request already exists for this holiday period."));
 
         var created = SkeletalStaffRequest.CreateDraft(
-            employee.Value.EmployeeId, employee.Value.InstituteId, period.Id, SerializeDates(dates.Value!),
-            dates.Value![0], dates.Value![^1], request.SignatureName, request.Comment);
+            employee.Value.EmployeeId, employee.Value.InstituteId, period.Id, SerializePeriod(period),
+            period.AvailabilityStartDate, period.AvailabilityEndDate, request.SignatureName, request.Comment);
         if (created.IsFailure) return EndpointProblems.FromError(created.Error!);
 
         db.SkeletalStaffRequests.Add(created.Value!);
@@ -176,9 +169,7 @@ internal static class SkeletalStaffEndpoints
 
         var period = await db.HolidayPeriods.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.HolidayPeriodId, ct);
         if (period is null || !IsEffectiveOpenPeriod(period, item.InstituteId)) return EndpointProblems.FromError(Error.Conflict("The associated holiday period is no longer open."));
-        var dates = ValidateDates(request.SelectedDates, period);
-        if (dates.IsFailure) return EndpointProblems.FromError(dates.Error!);
-        var updated = item.UpdateDraft(SerializeDates(dates.Value!), dates.Value![0], dates.Value![^1], request.SignatureName, request.Comment);
+        var updated = item.UpdateDraft(SerializePeriod(period), period.AvailabilityStartDate, period.AvailabilityEndDate, request.SignatureName, request.Comment);
         if (updated.IsFailure) return EndpointProblems.FromError(updated.Error!);
 
         await audit.RecordAsync("skeletal-staff-request.updated", "SkeletalStaffRequest", item.Id.ToString(), null, "draft-updated", ct);
@@ -241,7 +232,8 @@ internal static class SkeletalStaffEndpoints
             item.Value.InstituteId,
             item.Value.EmployeeId,
             chain[0],
-            ParseDates(item.Value.SelectedDatesJson),
+            item.Value.SelectedStartDate ?? DateTime.MinValue,
+            item.Value.SelectedEndDate ?? DateTime.MinValue,
             ct);
         await db.SaveChangesAsync(ct);
         context.Response.Headers.ETag = ConcurrencyToken.Format(item.Value.RowVersion);
@@ -277,7 +269,9 @@ internal static class SkeletalStaffEndpoints
         if (nextStage is not null)
             await notifications.StageSkeletalStaffAwaitingApprovalAsync(
                 item.Value.Id, item.Value.InstituteId, item.Value.EmployeeId, nextStage,
-                ParseDates(item.Value.SelectedDatesJson), ct);
+                item.Value.SelectedStartDate ?? DateTime.MinValue,
+                item.Value.SelectedEndDate ?? DateTime.MinValue,
+                ct);
         else
             await notifications.StageSkeletalStaffDecisionAsync(
                 item.Value.Id, item.Value.InstituteId, item.Value.EmployeeId, "approved", null, ct);
@@ -341,60 +335,6 @@ internal static class SkeletalStaffEndpoints
         await db.SaveChangesAsync(ct);
         context.Response.Headers.ETag = ConcurrencyToken.Format(item.Value.RowVersion);
         return TypedResults.Ok(Map(item.Value, EmptyApprovals));
-    }
-
-    private static async Task<IResult> CreditLeaveAsync(Guid id, CreditSkeletalStaffLeaveRequest request, HttpContext context, SpmeDbContext db, IAuditService audit, CancellationToken ct)
-    {
-        var item = await FindManagedAsync(id, context, db, ct);
-        if (item.IsFailure) return EndpointProblems.FromError(item.Error!);
-        if (!HolidayPeriodEndpoints.TryApplyEtag(context, db, item.Value!, out var problem)) return problem!;
-        var skeletalRequest = item.Value!;
-        var period = await db.HolidayPeriods.AsNoTracking().FirstOrDefaultAsync(x => x.Id == skeletalRequest.HolidayPeriodId, ct);
-        if (period is null) return EndpointProblems.FromError(Error.NotFound("Holiday period not found."));
-
-        var balance = await db.LeaveBalances.FirstOrDefaultAsync(x => x.EmployeeId == skeletalRequest.EmployeeId && x.LeaveType == LeaveTypes.Annual && x.LeaveYear == request.LeaveYear, ct);
-        if (balance is null)
-        {
-            balance = LeaveBalance.Create(skeletalRequest.EmployeeId, LeaveTypes.Annual, request.LeaveYear, 0m);
-            db.LeaveBalances.Add(balance);
-        }
-        if (period.DeductionDays > 0)
-        {
-            var adjusted = balance.AddAdjustment(period.DeductionDays);
-            if (adjusted.IsFailure) return EndpointProblems.FromError(adjusted.Error!);
-        }
-        var credited = skeletalRequest.CreditLeave(request.LeaveYear, DateTimeOffset.UtcNow);
-        if (credited.IsFailure) return EndpointProblems.FromError(credited.Error!);
-
-        await audit.RecordAsync("skeletal-staff-request.leave-credited", "SkeletalStaffRequest", id.ToString(), null, $"leaveYear={request.LeaveYear};days={period.DeductionDays}", ct);
-        await db.SaveChangesAsync(ct);
-        context.Response.Headers.ETag = ConcurrencyToken.Format(skeletalRequest.RowVersion);
-        return TypedResults.Ok(Map(skeletalRequest, EmptyApprovals));
-    }
-
-    private static async Task<IResult> GetAllowanceReportAsync(Guid id, HttpContext context, SpmeDbContext db, CancellationToken ct)
-    {
-        var item = await db.SkeletalStaffRequests.AsNoTracking().FirstOrDefaultAsync(x => x.Id == id, ct);
-        if (item is null || !CanAccess(context, item)) return EndpointProblems.FromError(Error.NotFound("Skeletal staff request not found."));
-        if (item.Status != SkeletalStaffRequestStatuses.Completed) return EndpointProblems.FromError(Error.StateTransition("The allowance report is available after the skeletal staff request is completed."));
-
-        var period = await db.HolidayPeriods.AsNoTracking().FirstOrDefaultAsync(x => x.Id == item.HolidayPeriodId, ct);
-        if (period is null) return EndpointProblems.FromError(Error.NotFound("Holiday period not found."));
-        var employee = await db.Employees.AsNoTracking().Where(x => x.Id == item.EmployeeId)
-            .Select(x => new SkeletalStaffEmployeeSummaryResponse(x.Id, x.StaffId, x.Surname, x.OtherNames))
-            .FirstOrDefaultAsync(ct);
-        var institute = await db.Institutes.AsNoTracking().Where(x => x.Id == item.InstituteId)
-            .Select(x => new SkeletalStaffInstituteSummaryResponse(x.Id, x.Code, x.Name))
-            .FirstOrDefaultAsync(ct);
-        if (employee is null || institute is null) return EndpointProblems.FromError(Error.NotFound("Skeletal staff report data not found."));
-        var approvals = await LoadApprovalsAsync(db, [id], ct);
-        var creditStatus = item.LeaveCreditedAt.HasValue ? "credited" : "pending-credit";
-        var eligibility = new SkeletalStaffAllowanceEligibilityResponse(
-            "leave-credit", creditStatus, null, null, period.DeductionDays, item.LeaveCreditYear, item.LeaveCreditedAt,
-            "No approved monetary allowance type or rate is configured. This report records leave-credit eligibility only.");
-        return TypedResults.Ok(new SkeletalStaffAllowanceReportResponse(
-            1, DateTimeOffset.UtcNow, Map(item, approvals), employee, institute, HolidayPeriodEndpoints.Map(period), eligibility,
-            "not-configured"));
     }
 
     private static async Task<IResult> ListPendingApprovalsAsync(
@@ -461,7 +401,8 @@ internal static class SkeletalStaffEndpoints
             item.InstituteId,
             item.EmployeeId,
             item.CurrentApprovalStage,
-            ParseDates(item.SelectedDatesJson),
+            item.SelectedStartDate ?? DateTime.MinValue,
+            item.SelectedEndDate ?? DateTime.MinValue,
             ct);
         await db.SaveChangesAsync(ct);
         return TypedResults.NoContent();
@@ -525,14 +466,12 @@ internal static class SkeletalStaffEndpoints
             $"{period.LeaveYear} holiday period",
             period.AvailabilityStartDate,
             period.AvailabilityEndDate,
-            ParseDates(item.SelectedDatesJson),
             approvals.GetValueOrDefault(id, []).Select(approval =>
                 new SkeletalStaffApprovalTrailEntry(
                     approval.ApprovalStage,
                     approval.Decision,
                     approval.DecidedAt,
                     approval.Comments)).ToList(),
-            item.LeaveCreditedAt.HasValue ? "credited" : "pending-credit",
             pdf,
             true), ct);
         await db.SaveChangesAsync(ct);
@@ -572,8 +511,11 @@ internal static class SkeletalStaffEndpoints
             $"Section: {sectionName ?? "Not assigned"}",
             $"Holiday period: {period.LeaveYear}",
             $"Availability window: {period.AvailabilityStartDate:dd MMM yyyy} to {period.AvailabilityEndDate:dd MMM yyyy}",
-            $"Selected dates: {string.Join(", ", ParseDates(item.SelectedDatesJson).Select(date => date.ToString("dd MMM yyyy")))}",
-            $"Leave credit status: {(item.LeaveCreditedAt.HasValue ? "credited" : "pending-credit")}",
+            $"Enrolment period: {item.SelectedStartDate:dd MMM yyyy} to {item.SelectedEndDate:dd MMM yyyy}",
+            $"Status: {item.Status.Replace('-', ' ')}",
+            $"Submitted: {(item.SubmittedAt.HasValue ? item.SubmittedAt.Value.ToString("dd MMM yyyy HH:mm") : "Not submitted")}",
+            $"Completed: {(item.CompletedAt.HasValue ? item.CompletedAt.Value.ToString("dd MMM yyyy HH:mm") : "Not completed")}",
+            $"Employee comment: {item.Comment ?? "None"}",
             string.Empty,
             "Approval trail"
         };
@@ -691,16 +633,9 @@ internal static class SkeletalStaffEndpoints
             : Result<Guid>.Failure(Error.Forbidden("An institute scope is required."));
     }
 
-    private static Result<List<DateTime>> ValidateDates(IReadOnlyList<DateTime> selectedDates, HolidayPeriod period)
-    {
-        var dates = selectedDates.Select(x => x.Date).Distinct().OrderBy(x => x).ToList();
-        if (dates.Count == 0 || dates.Count != selectedDates.Count || dates.Any(x => x < period.AvailabilityStartDate || x > period.AvailabilityEndDate))
-            return Result<List<DateTime>>.Failure(Error.Validation("Selected dates must be distinct and within the holiday period availability window."));
-        return Result<List<DateTime>>.Success(dates);
-    }
-
     private static bool IsEffectiveOpenPeriod(HolidayPeriod period, Guid instituteId) =>
         period.Status == HolidayPeriodStatuses.Open &&
+        period.AvailabilityEndDate.Date >= period.AvailabilityStartDate.Date &&
         (period.ScopeType == ScopeTypes.CsirWide || (period.ScopeType == ScopeTypes.Institute && period.InstituteId == instituteId));
 
     private static bool IsManager(HttpContext context) => context.User.IsInRole(SpmeRoles.HrAdmin) || HolidayPeriodEndpoints.IsPlatform(context);
@@ -724,8 +659,7 @@ internal static class SkeletalStaffEndpoints
         HolidayPeriodEndpoints.IsPlatform(context) || HolidayPeriodEndpoints.InstituteId(context) == item.InstituteId;
     private static bool CanManageOwnRequest(HttpContext context, SkeletalStaffRequest item) => IsManager(context) || EmployeeId(context) == item.EmployeeId;
 
-    private static string SerializeDates(IReadOnlyList<DateTime> dates) => JsonSerializer.Serialize(dates.Select(x => x.Date));
-    private static IReadOnlyList<DateTime> ParseDates(string json) => JsonSerializer.Deserialize<List<DateTime>>(json)?.Select(x => x.Date).OrderBy(x => x).ToList() ?? [];
+    private static string SerializePeriod(HolidayPeriod period) => JsonSerializer.Serialize(new[] { period.AvailabilityStartDate.Date, period.AvailabilityEndDate.Date });
 
     private static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<SkeletalStaffApprovalResponse>>> LoadApprovalsAsync(SpmeDbContext db, IEnumerable<Guid> requestIds, CancellationToken ct)
     {
@@ -737,7 +671,7 @@ internal static class SkeletalStaffEndpoints
     }
 
     private static SkeletalStaffRequestResponse Map(SkeletalStaffRequest item, IReadOnlyDictionary<Guid, IReadOnlyList<SkeletalStaffApprovalResponse>> approvals) => new(
-        item.Id, item.EmployeeId, item.HolidayPeriodId, ParseDates(item.SelectedDatesJson), item.SelectedStartDate ?? DateTime.MinValue, item.SelectedEndDate ?? DateTime.MinValue,
+        item.Id, item.EmployeeId, item.HolidayPeriodId, item.SelectedStartDate ?? DateTime.MinValue, item.SelectedEndDate ?? DateTime.MinValue,
         item.Status, item.CurrentApprovalStage, item.SignatureName, item.Comment, item.RejectionReason, item.SubmittedAt, item.CompletedAt,
-        item.LeaveCreditYear, item.LeaveCreditedAt, approvals.GetValueOrDefault(item.Id, []), ConcurrencyToken.Format(item.RowVersion), item.CreatedAt, item.UpdatedAt);
+        approvals.GetValueOrDefault(item.Id, []), ConcurrencyToken.Format(item.RowVersion), item.CreatedAt, item.UpdatedAt);
 }

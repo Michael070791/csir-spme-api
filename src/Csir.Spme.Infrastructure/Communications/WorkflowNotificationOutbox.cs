@@ -469,7 +469,8 @@ public sealed class WorkflowNotificationOutbox(
         Guid instituteId,
         Guid employeeId,
         string approvalStage,
-        IReadOnlyList<DateTime> selectedDates,
+        DateTime periodStart,
+        DateTime periodEnd,
         CancellationToken ct = default)
     {
         var staffName = await EmployeeDisplayNameAsync(employeeId, ct);
@@ -490,7 +491,8 @@ public sealed class WorkflowNotificationOutbox(
                 approver.DisplayName,
                 staffName,
                 approvalStage,
-                selectedDates,
+                periodStart,
+                periodEnd,
                 requestId,
                 issued.RawToken);
             await StageEmailAsync(
@@ -528,8 +530,6 @@ public sealed class WorkflowNotificationOutbox(
 
         var request = db.SkeletalStaffRequests.Local.FirstOrDefault(candidate => candidate.Id == requestId)
             ?? await db.SkeletalStaffRequests.AsNoTracking().SingleAsync(candidate => candidate.Id == requestId, ct);
-        var selectedDates = System.Text.Json.JsonSerializer.Deserialize<List<DateTime>>(request.SelectedDatesJson)?
-            .Select(date => date.Date).OrderBy(date => date).ToList() ?? [];
         db.Notifications.Add(new Notification(
             owner.UserId,
             decision == "approved" ? "Skeletal staff request approved" : "Skeletal staff request rejected",
@@ -543,7 +543,8 @@ public sealed class WorkflowNotificationOutbox(
         var rendered = renderer.SkeletalStaffDecision(
             owner.DisplayName,
             decision,
-            selectedDates,
+            request.SelectedStartDate ?? DateTime.MinValue,
+            request.SelectedEndDate ?? DateTime.MinValue,
             reason,
             requestId);
         await StageEmailAsync(

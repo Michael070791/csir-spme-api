@@ -92,16 +92,15 @@ public sealed class BrandedEmailRenderer
         string approverDisplayName,
         string staffDisplayName,
         string approvalStage,
-        IReadOnlyList<DateTime> selectedDates,
+        DateTime periodStart,
+        DateTime periodEnd,
         Guid requestId,
         string approvalToken)
     {
         var stageLabel = approvalStage.Replace('-', ' ');
-        var dateSummary = selectedDates.Count == 0
-            ? "selected dates"
-            : $"{selectedDates.Min():dd MMM yyyy} to {selectedDates.Max():dd MMM yyyy} ({selectedDates.Count} day(s))";
+        var dateSummary = $"{periodStart:dd MMM yyyy} to {periodEnd:dd MMM yyyy}";
         var detail =
-            $"{staffDisplayName} submitted a skeletal staff availability request for {dateSummary}. It is waiting for {stageLabel} review.";
+            $"{staffDisplayName} submitted a skeletal staff request for the period {dateSummary}. It is waiting for {stageLabel} review.";
         var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/approvals/skeletal-staff?token={Uri.EscapeDataString(approvalToken)}";
         return Render(
             "Skeletal staff request awaiting your approval",
@@ -116,14 +115,13 @@ public sealed class BrandedEmailRenderer
     public RenderedEmail SkeletalStaffDecision(
         string displayName,
         string decision,
-        IReadOnlyList<DateTime> selectedDates,
+        DateTime periodStart,
+        DateTime periodEnd,
         string? rejectionReason,
         Guid requestId)
     {
-        var dateSummary = selectedDates.Count == 0
-            ? "your selected dates"
-            : $"{selectedDates.Min():dd MMM yyyy} to {selectedDates.Max():dd MMM yyyy}";
-        var detail = $"Your skeletal staff availability request for {dateSummary} has been {decision}.";
+        var dateSummary = $"{periodStart:dd MMM yyyy} to {periodEnd:dd MMM yyyy}";
+        var detail = $"Your skeletal staff request for the period {dateSummary} has been {decision}.";
         if (decision == "rejected" && !string.IsNullOrWhiteSpace(rejectionReason))
             detail += $" Reason: {rejectionReason.Trim()}";
         var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/skeletal-staff/{requestId:D}";

@@ -132,7 +132,7 @@ internal static class WorkflowApprovalEndpoints
             validation.ResourceId,
             validation.Stage,
             "Skeletal staff request awaiting approval",
-            $"{ParseDates(request.SelectedDatesJson).Count} selected day(s)",
+            $"Skeletal staff period from {request.SelectedStartDate:dd MMM yyyy} to {request.SelectedEndDate:dd MMM yyyy}",
             $"/skeletal-staff/{validation.ResourceId:D}",
             ConcurrencyToken.Format(request.RowVersion)));
     }
@@ -200,7 +200,13 @@ internal static class WorkflowApprovalEndpoints
             await audit.RecordAsync("skeletal-staff-request.approved", "SkeletalStaffRequest", item.Id.ToString(), $"stage={validation.Stage}", $"status={item.Status}", ct);
             if (nextStage is not null)
                 await notifications.StageSkeletalStaffAwaitingApprovalAsync(
-                    item.Id, item.InstituteId, item.EmployeeId, nextStage, ParseDates(item.SelectedDatesJson), ct);
+                    item.Id,
+                    item.InstituteId,
+                    item.EmployeeId,
+                    nextStage,
+                    item.SelectedStartDate ?? DateTime.MinValue,
+                    item.SelectedEndDate ?? DateTime.MinValue,
+                    ct);
             else
                 await notifications.StageSkeletalStaffDecisionAsync(item.Id, item.InstituteId, item.EmployeeId, "approved", null, ct);
         }
@@ -234,6 +240,4 @@ internal static class WorkflowApprovalEndpoints
             .SingleOrDefaultAsync(ct);
     }
 
-    private static IReadOnlyList<DateTime> ParseDates(string json) =>
-        System.Text.Json.JsonSerializer.Deserialize<List<DateTime>>(json)?.Select(x => x.Date).OrderBy(x => x).ToList() ?? [];
 }

@@ -18,7 +18,7 @@ internal static class HolidayPeriodEndpoints
             .WithGroupName("v2")
             .WithTags("Leave")
             .RequireAuthorization()
-            .WithDescription("Institute and CSIR-wide holiday periods define the dates and leave-credit terms used by the skeletal staff workflow. Institute callers are constrained to their own scope, while platform administration manages CSIR-wide periods.")
+            .WithDescription("Institute and CSIR-wide holiday periods define the availability date window used by the skeletal staff workflow. Institute callers are constrained to their own scope, while platform administration manages CSIR-wide periods.")
             .ProducesProblem(StatusCodes.Status401Unauthorized)
             .ProducesProblem(StatusCodes.Status403Forbidden);
 
@@ -36,7 +36,7 @@ internal static class HolidayPeriodEndpoints
             .Produces<HolidayPeriodResponse>(StatusCodes.Status201Created).ProducesProblem(StatusCodes.Status409Conflict);
         periods.MapPatch("/{id:guid}", UpdateAsync).RequireAuthorization(AuthorizationPolicies.ManageLeave).WithName("HolidayPeriods_Update")
             .WithSummary("Update a holiday period with an ETag.")
-            .WithDescription("Updates dates, availability window, deduction days, status, and notes for a holiday period the caller may manage. Institute managers cannot alter CSIR-wide periods; the current If-Match ETag is required and stale versions return precondition failed.")
+            .WithDescription("Updates dates, availability window, status, and notes for a holiday period the caller may manage. Institute managers cannot alter CSIR-wide periods; the current If-Match ETag is required and stale versions return precondition failed.")
             .Produces<HolidayPeriodResponse>(StatusCodes.Status200OK).ProducesProblem(StatusCodes.Status412PreconditionFailed);
         periods.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization(AuthorizationPolicies.ManageLeave).WithName("HolidayPeriods_Delete")
             .WithSummary("Delete an unused draft holiday period with an ETag.")
@@ -79,7 +79,7 @@ internal static class HolidayPeriodEndpoints
         var created = HolidayPeriod.Create(
             request.ScopeType.Trim(), institute.Value, request.LeaveYear,
             request.ChristmasStartDate, request.ChristmasEndDate, request.NewYearStartDate, request.NewYearEndDate,
-            request.AvailabilityStartDate, request.AvailabilityEndDate, request.DeductionDays, request.Status.Trim(), request.Notes);
+            request.AvailabilityStartDate, request.AvailabilityEndDate, request.Status.Trim(), request.Notes);
         if (created.IsFailure) return EndpointProblems.FromError(created.Error!);
 
         db.HolidayPeriods.Add(created.Value!);
@@ -96,7 +96,7 @@ internal static class HolidayPeriodEndpoints
 
         var updated = period.Update(
             request.ChristmasStartDate, request.ChristmasEndDate, request.NewYearStartDate, request.NewYearEndDate,
-            request.AvailabilityStartDate, request.AvailabilityEndDate, request.DeductionDays, request.Status.Trim(), request.Notes);
+            request.AvailabilityStartDate, request.AvailabilityEndDate, request.Status.Trim(), request.Notes);
         if (updated.IsFailure) return EndpointProblems.FromError(updated.Error!);
 
         await db.SaveChangesAsync(ct);
@@ -120,7 +120,7 @@ internal static class HolidayPeriodEndpoints
     internal static HolidayPeriodResponse Map(HolidayPeriod period) => new(
         period.Id, period.ScopeType, period.InstituteId, period.LeaveYear,
         period.ChristmasStartDate, period.ChristmasEndDate, period.NewYearStartDate, period.NewYearEndDate,
-        period.AvailabilityStartDate, period.AvailabilityEndDate, period.DeductionDays, period.Status,
+        period.AvailabilityStartDate, period.AvailabilityEndDate, period.Status,
         period.Notes, ConcurrencyToken.Format(period.RowVersion), period.CreatedAt, period.UpdatedAt);
 
     internal static bool IsPlatform(HttpContext context) => context.User.IsInRole(SpmeRoles.PlatformAdmin);

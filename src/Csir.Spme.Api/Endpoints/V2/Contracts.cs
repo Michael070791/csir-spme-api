@@ -798,7 +798,6 @@ public sealed record HolidayPeriodResponse(
     DateTime NewYearEndDate,
     DateTime AvailabilityStartDate,
     DateTime AvailabilityEndDate,
-    short DeductionDays,
     string Status,
     string? Notes,
     string Etag,
@@ -815,7 +814,6 @@ public sealed record CreateHolidayPeriodRequest(
     DateTime NewYearEndDate,
     DateTime AvailabilityStartDate,
     DateTime AvailabilityEndDate,
-    [property: Range(0, 365)] short DeductionDays,
     [property: Required, StringLength(32)] string Status,
     [property: StringLength(2000)] string? Notes);
 
@@ -826,7 +824,6 @@ public sealed record UpdateHolidayPeriodRequest(
     DateTime NewYearEndDate,
     DateTime AvailabilityStartDate,
     DateTime AvailabilityEndDate,
-    [property: Range(0, 365)] short DeductionDays,
     [property: Required, StringLength(32)] string Status,
     [property: StringLength(2000)] string? Notes);
 
@@ -842,7 +839,6 @@ public sealed record SkeletalStaffRequestResponse(
     Guid Id,
     Guid EmployeeId,
     Guid HolidayPeriodId,
-    IReadOnlyList<DateTime> SelectedDates,
     DateTime SelectedStartDate,
     DateTime SelectedEndDate,
     string Status,
@@ -852,8 +848,6 @@ public sealed record SkeletalStaffRequestResponse(
     string? RejectionReason,
     DateTimeOffset? SubmittedAt,
     DateTimeOffset? CompletedAt,
-    short? LeaveCreditYear,
-    DateTimeOffset? LeaveCreditedAt,
     IReadOnlyList<SkeletalStaffApprovalResponse> Approvals,
     string Etag,
     DateTimeOffset CreatedAt,
@@ -861,13 +855,11 @@ public sealed record SkeletalStaffRequestResponse(
 
 public sealed record CreateSkeletalStaffRequest(
     Guid HolidayPeriodId,
-    [property: Required, MinLength(1)] IReadOnlyList<DateTime> SelectedDates,
     [property: Required, StringLength(256, MinimumLength = 1)] string SignatureName,
     [property: StringLength(2000)] string? Comment,
     bool ConfirmAvailability);
 
 public sealed record UpdateSkeletalStaffRequest(
-    [property: Required, MinLength(1)] IReadOnlyList<DateTime> SelectedDates,
     [property: Required, StringLength(256, MinimumLength = 1)] string SignatureName,
     [property: StringLength(2000)] string? Comment,
     bool ConfirmAvailability);
@@ -897,40 +889,6 @@ public sealed record WorkflowApprovalDecideRequest(
 public sealed record RejectSkeletalStaffRequest(
     [property: Required, StringLength(2000, MinimumLength = 1)] string Reason,
     [property: StringLength(2000)] string? Comments);
-
-public sealed record CreditSkeletalStaffLeaveRequest(
-    [property: Range(2000, 3000)] short LeaveYear);
-
-public sealed record SkeletalStaffAllowanceEligibilityResponse(
-    string AllowanceType,
-    string Status,
-    decimal? MonetaryAmount,
-    string? Currency,
-    decimal LeaveCreditDays,
-    short? LeaveCreditYear,
-    DateTimeOffset? LeaveCreditedAt,
-    string Notes);
-
-public sealed record SkeletalStaffEmployeeSummaryResponse(
-    Guid Id,
-    string StaffId,
-    string Surname,
-    string? OtherNames);
-
-public sealed record SkeletalStaffInstituteSummaryResponse(
-    Guid Id,
-    string Code,
-    string Name);
-
-public sealed record SkeletalStaffAllowanceReportResponse(
-    int SchemaVersion,
-    DateTimeOffset GeneratedAt,
-    SkeletalStaffRequestResponse Request,
-    SkeletalStaffEmployeeSummaryResponse Employee,
-    SkeletalStaffInstituteSummaryResponse Institute,
-    HolidayPeriodResponse HolidayPeriod,
-    SkeletalStaffAllowanceEligibilityResponse AllowanceEligibility,
-    string MonetaryAllowanceStatus);
 
 public sealed record LeaveTypeMetadataResponse(
     string Code,

@@ -28,7 +28,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
     public SkeletalStaffEndpointTests(SpmeApiFactory factory) => _factory = factory;
 
     [Fact]
-    public async Task Skeletal_staff_request_moves_from_draft_to_credited_with_an_allowance_report()
+    public async Task Skeletal_staff_request_moves_from_draft_to_approved_service_report_without_leave_credit()
     {
         var seed = await SeedAsync();
         var employee = Client(CreateToken(SpmeRoles.Employee, seed.InstituteA, seed.EmployeeId, seed.EmployeeUserId));
@@ -43,20 +43,23 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         (await _factory.CreateClient().GetAsync("/api/v2/skeletal-staff-requests")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         var activePeriod = await employee.GetFromJsonAsync<HolidayPeriodResponse>("/api/v2/skeletal-staff-requests/active-holiday-period");
         activePeriod!.Id.Should().Be(seed.HolidayPeriodId);
+        activePeriod.AvailabilityStartDate.Should().BeAfter(today);
 
         var create = await employee.PostAsJsonAsync("/api/v2/skeletal-staff-requests", new CreateSkeletalStaffRequest(
-            seed.HolidayPeriodId, [today, today.AddDays(1)], "Ama Mensah", "Available for duty.", true));
+            seed.HolidayPeriodId, "Ama Mensah", "Available for duty.", true));
         create.StatusCode.Should().Be(HttpStatusCode.Created);
         create.Headers.ETag.Should().NotBeNull();
         var draft = await create.Content.ReadFromJsonAsync<SkeletalStaffRequestResponse>();
         draft!.Status.Should().Be(SkeletalStaffRequestStatuses.Draft);
+        draft.SelectedStartDate.Should().Be(activePeriod.AvailabilityStartDate);
+        draft.SelectedEndDate.Should().Be(activePeriod.AvailabilityEndDate);
 
         using var invalidUpdate = Request(HttpMethod.Patch, $"/api/v2/skeletal-staff-requests/{draft.Id}", create.Headers.ETag!.Tag!,
-            new UpdateSkeletalStaffRequest([today.AddDays(30)], "Ama Mensah", null, true));
+            new UpdateSkeletalStaffRequest("Ama Mensah", null, false));
         (await employee.SendAsync(invalidUpdate)).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
 
         using var update = Request(HttpMethod.Patch, $"/api/v2/skeletal-staff-requests/{draft.Id}", create.Headers.ETag!.Tag!,
-            new UpdateSkeletalStaffRequest([today, today.AddDays(2)], "Ama Mensah", "Updated availability.", true));
+            new UpdateSkeletalStaffRequest("Ama Mensah", "Updated availability.", true));
         var updatedResponse = await employee.SendAsync(update);
         updatedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var draftEtag = updatedResponse.Headers.ETag!.Tag!;
@@ -93,29 +96,24 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         completedResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         var completed = await completedResponse.Content.ReadFromJsonAsync<SkeletalStaffRequestResponse>();
         completed!.Status.Should().Be(SkeletalStaffRequestStatuses.Completed);
-        etag = completedResponse.Headers.ETag!.Tag!;
-
-        var pendingReport = await employee.GetFromJsonAsync<SkeletalStaffAllowanceReportResponse>($"/api/v2/skeletal-staff-requests/{draft.Id}/allowance-report");
-        pendingReport!.AllowanceEligibility.Status.Should().Be("pending-credit");
-        pendingReport.AllowanceEligibility.MonetaryAmount.Should().BeNull();
-        pendingReport.MonetaryAllowanceStatus.Should().Be("not-configured");
-        pendingReport.Employee.Id.Should().Be(seed.EmployeeId);
-        pendingReport.Institute.Id.Should().Be(seed.InstituteA);
-
-        using var credit = Request(HttpMethod.Post, $"/api/v2/skeletal-staff-requests/{draft.Id}/credit-leave", etag,
-            new CreditSkeletalStaffLeaveRequest((short)today.Year));
-        var creditResponse = await hr.SendAsync(credit);
-        creditResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-
-        var creditedReport = await employee.GetFromJsonAsync<SkeletalStaffAllowanceReportResponse>($"/api/v2/skeletal-staff-requests/{draft.Id}/allowance-report");
-        creditedReport!.AllowanceEligibility.Status.Should().Be("credited");
-        creditedReport.AllowanceEligibility.LeaveCreditDays.Should().Be(4m);
-        creditedReport.AllowanceEligibility.LeaveCreditYear.Should().Be((short)today.Year);
+        (await employee.GetAsync($"/api/v2/skeletal-staff-requests/{draft.Id}/allowance-report")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        using var credit = Request(HttpMethod.Post, $"/api/v2/skeletal-staff-requests/{draft.Id}/credit-leave", completedResponse.Headers.ETag!.Tag!,
+            new { leaveYear = today.Year });
+        (await hr.SendAsync(credit)).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await employee.GetAsync($"/api/v2/skeletal-staff-requests/{draft.Id}/service-report")).StatusCode.Should().Be(HttpStatusCode.Conflict);
 
         using var scope = _factory.Services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SpmeDbContext>();
-        var balance = await db.LeaveBalances.SingleAsync(x => x.EmployeeId == seed.EmployeeId && x.LeaveType == LeaveTypes.Annual && x.LeaveYear == today.Year);
-        balance.AdjustedDays.Should().Be(4m);
+        (await db.LeaveBalances.AnyAsync(x => x.EmployeeId == seed.EmployeeId && x.LeaveType == LeaveTypes.Annual && x.LeaveYear == today.Year))
+            .Should().BeFalse();
+        var period = await db.HolidayPeriods.SingleAsync(x => x.Id == seed.HolidayPeriodId);
+        var closePeriod = period.Update(period.ChristmasStartDate, period.ChristmasEndDate, period.NewYearStartDate, period.NewYearEndDate,
+            period.AvailabilityStartDate, period.AvailabilityEndDate, HolidayPeriodStatuses.Closed, period.Notes);
+        closePeriod.IsSuccess.Should().BeTrue();
+        await db.SaveChangesAsync();
+        var report = await employee.GetAsync($"/api/v2/skeletal-staff-requests/{draft.Id}/service-report");
+        report.StatusCode.Should().Be(HttpStatusCode.OK);
+        report.Content.Headers.ContentType!.MediaType.Should().Be("application/pdf");
         var approvals = await db.SkeletalStaffApprovals.Where(x => x.SkeletalStaffRequestId == draft.Id).ToListAsync();
         approvals.Should().HaveCount(SkeletalStaffApprovalStages.DefaultChain.Length);
         approvals.Should().OnlyContain(approval => approval.ApproverUserId.HasValue);
@@ -135,7 +133,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var period = HolidayPeriod.Create(
             ScopeTypes.Institute, institute.Id, (short)today.Year,
             today, today.AddDays(2), today.AddDays(3), today.AddDays(5),
-            today.AddDays(-1), today.AddDays(7), 4, HolidayPeriodStatuses.Open, null).Value!;
+            today.AddDays(-1), today.AddDays(7), HolidayPeriodStatuses.Open, null).Value!;
         db.Institutes.Add(institute);
         db.Divisions.Add(division);
         db.Sections.Add(section);
@@ -148,7 +146,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
 
         var client = Client(CreateToken(SpmeRoles.Employee, institute.Id, employee.Id));
         var create = await client.PostAsJsonAsync("/api/v2/skeletal-staff-requests", new CreateSkeletalStaffRequest(
-            period.Id, [today], "Casey Mensah", null, true));
+            period.Id, "Casey Mensah", null, true));
         var draft = await create.Content.ReadFromJsonAsync<SkeletalStaffRequestResponse>();
         using var submit = Request(HttpMethod.Post, $"/api/v2/skeletal-staff-requests/{draft!.Id}/submit", create.Headers.ETag!.Tag!, null);
         (await client.SendAsync(submit)).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
@@ -160,7 +158,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var seed = await SeedAsync();
         var employee = Client(CreateToken(SpmeRoles.Employee, seed.InstituteA, seed.EmployeeId));
         var create = await employee.PostAsJsonAsync("/api/v2/skeletal-staff-requests", new CreateSkeletalStaffRequest(
-            seed.HolidayPeriodId, [DateTime.UtcNow.Date], "Ama Mensah", null, true));
+            seed.HolidayPeriodId, "Ama Mensah", null, true));
         var draft = await create.Content.ReadFromJsonAsync<SkeletalStaffRequestResponse>();
 
         using var delete = new HttpRequestMessage(HttpMethod.Delete, $"/api/v2/skeletal-staff-requests/{draft!.Id}");
@@ -178,7 +176,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var createRequest = new CreateHolidayPeriodRequest(
             ScopeTypes.Institute, null, (short)(DateTime.UtcNow.Year + 1),
             start, start.AddDays(2), start.AddDays(3), start.AddDays(5),
-            start, start.AddDays(7), 3, HolidayPeriodStatuses.Draft, "Draft period.");
+            start, start.AddDays(7), HolidayPeriodStatuses.Draft, "Draft period.");
 
         var create = await hr.PostAsJsonAsync("/api/v2/holiday-periods", createRequest);
         create.StatusCode.Should().Be(HttpStatusCode.Created);
@@ -188,7 +186,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         using var update = Request(HttpMethod.Patch, $"/api/v2/holiday-periods/{created.Id}", create.Headers.ETag!.Tag!,
             new UpdateHolidayPeriodRequest(
                 start, start.AddDays(2), start.AddDays(3), start.AddDays(5),
-                start, start.AddDays(8), 4, HolidayPeriodStatuses.Draft, "Updated draft period."));
+                start, start.AddDays(8), HolidayPeriodStatuses.Draft, "Updated draft period."));
         var updateResponse = await hr.SendAsync(update);
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -252,7 +250,7 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var period = HolidayPeriod.Create(
             ScopeTypes.Institute, instituteA.Id, (short)today.Year,
             today, today.AddDays(2), today.AddDays(3), today.AddDays(5),
-            today.AddDays(-1), today.AddDays(7), 4, HolidayPeriodStatuses.Open, null).Value!;
+            today.AddDays(7), today.AddDays(14), HolidayPeriodStatuses.Open, null).Value!;
 
         db.Institutes.AddRange(instituteA, instituteB);
         db.Divisions.Add(division);

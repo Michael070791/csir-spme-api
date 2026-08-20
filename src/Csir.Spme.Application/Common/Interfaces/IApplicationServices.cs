@@ -166,7 +166,8 @@ public interface IWorkflowNotificationOutbox
         Guid instituteId,
         Guid employeeId,
         string approvalStage,
-        IReadOnlyList<DateTime> selectedDates,
+        DateTime periodStart,
+        DateTime periodEnd,
         CancellationToken ct = default);
 
     Task StageSkeletalStaffDecisionAsync(
@@ -200,9 +201,7 @@ public sealed record SkeletalStaffServiceReportNotification(
     string PeriodName,
     DateTime AvailabilityStart,
     DateTime AvailabilityEnd,
-    IReadOnlyList<DateTime> SelectedDates,
     IReadOnlyList<SkeletalStaffApprovalTrailEntry> Approvals,
-    string LeaveCreditStatus,
     byte[] PdfContent,
     bool AttachPdf);
 
