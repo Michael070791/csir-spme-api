@@ -4,6 +4,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Csir.Spme.Api.Auth;
 using Csir.Spme.Api.Endpoints.V2;
 using Csir.Spme.Domain.Constants;
@@ -190,10 +191,29 @@ public sealed class SkeletalStaffEndpointTests : IClassFixture<SpmeApiFactory>
         var updateResponse = await hr.SendAsync(update);
         updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
 
+        using var staleUpdate = Request(HttpMethod.Patch, $"/api/v2/holiday-periods/{created.Id}", create.Headers.ETag!.Tag!,
+            new UpdateHolidayPeriodRequest(
+                start, start.AddDays(2), start.AddDays(3), start.AddDays(5),
+                start, start.AddDays(9), HolidayPeriodStatuses.Draft, "Stale update."));
+        await AssertConcurrencyProblemAsync(await hr.SendAsync(staleUpdate));
+
+        using var staleDelete = new HttpRequestMessage(HttpMethod.Delete, $"/api/v2/holiday-periods/{created.Id}");
+        staleDelete.Headers.IfMatch.ParseAdd(create.Headers.ETag!.Tag!);
+        await AssertConcurrencyProblemAsync(await hr.SendAsync(staleDelete));
+
         using var delete = new HttpRequestMessage(HttpMethod.Delete, $"/api/v2/holiday-periods/{created.Id}");
         delete.Headers.IfMatch.ParseAdd(updateResponse.Headers.ETag!.Tag!);
         (await hr.SendAsync(delete)).StatusCode.Should().Be(HttpStatusCode.NoContent);
         (await hr.GetAsync($"/api/v2/holiday-periods/{created.Id}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    private static async Task AssertConcurrencyProblemAsync(HttpResponseMessage response)
+    {
+        response.StatusCode.Should().Be(HttpStatusCode.PreconditionFailed);
+        response.Content.Headers.ContentType!.MediaType.Should().Be("application/problem+json");
+        using var json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        json.RootElement.GetProperty("code").GetString().Should().Be("concurrency_conflict");
+        json.RootElement.GetProperty("errorCode").GetString().Should().Be("concurrency_conflict");
     }
 
     private async Task<Seed> SeedAsync()

@@ -41,7 +41,8 @@ internal static class HolidayPeriodEndpoints
         periods.MapDelete("/{id:guid}", DeleteAsync).RequireAuthorization(AuthorizationPolicies.ManageLeave).WithName("HolidayPeriods_Delete")
             .WithSummary("Delete an unused draft holiday period with an ETag.")
             .WithDescription("Deletes only a manageable holiday period that remains in draft and has no skeletal staff requests. The current If-Match ETag is required; non-draft or referenced periods return conflict, stale versions return precondition failed, and inaccessible records return not found.")
-            .Produces(StatusCodes.Status204NoContent).ProducesProblem(StatusCodes.Status409Conflict);
+            .Produces(StatusCodes.Status204NoContent).ProducesProblem(StatusCodes.Status409Conflict)
+            .ProducesProblem(StatusCodes.Status412PreconditionFailed);
     }
 
     private static async Task<IResult> ListAsync(HttpContext context, SpmeDbContext db, short? leaveYear, string? status, CancellationToken ct)
@@ -99,7 +100,16 @@ internal static class HolidayPeriodEndpoints
             request.AvailabilityStartDate, request.AvailabilityEndDate, request.Status.Trim(), request.Notes);
         if (updated.IsFailure) return EndpointProblems.FromError(updated.Error!);
 
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            return EndpointProblems.FromError(Error.PreconditionFailed(
+                "The holiday period was modified by another request. Reload it and retry."));
+        }
+
         context.Response.Headers.ETag = ConcurrencyToken.Format(period.RowVersion);
         return TypedResults.Ok(Map(period));
     }
@@ -113,7 +123,16 @@ internal static class HolidayPeriodEndpoints
         if (await db.SkeletalStaffRequests.AnyAsync(x => x.HolidayPeriodId == id, ct)) return EndpointProblems.FromError(Error.Conflict("A holiday period with skeletal staff requests cannot be deleted."));
 
         db.HolidayPeriods.Remove(period);
-        await db.SaveChangesAsync(ct);
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (ConcurrencyConflictException)
+        {
+            return EndpointProblems.FromError(Error.PreconditionFailed(
+                "The holiday period was modified by another request. Reload it and retry."));
+        }
+
         return TypedResults.NoContent();
     }
 
