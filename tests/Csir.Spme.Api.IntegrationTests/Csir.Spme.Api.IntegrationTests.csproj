@@ -19,4 +19,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Csir.Spme.Api\Csir.Spme.Api.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Update="Fixtures\CSIR_PERFORMANCE_MANAGEMENT_FORM_-final[1] (4) (1).docx"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

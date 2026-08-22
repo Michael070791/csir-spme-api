@@ -1,56 +1,54 @@
-﻿using System;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
-namespace Csir.Spme.Infrastructure.Persistence.Migrations
+namespace Csir.Spme.Infrastructure.Persistence.Migrations;
+
+[DbContext(typeof(SpmeDbContext))]
+[Migration("20260820175352_RemoveSkeletalStaffLeaveCredit")]
+public partial class RemoveSkeletalStaffLeaveCredit : Migration
 {
-    /// <inheritdoc />
-    public partial class RemoveSkeletalStaffLeaveCredit : Migration
+    protected override void Up(MigrationBuilder migrationBuilder)
     {
-        /// <inheritdoc />
-        protected override void Up(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.DropColumn(
-                name: "LeaveCreditYear",
-                schema: "leave",
-                table: "SkeletalStaffRequests");
+        migrationBuilder.DropColumn(
+            name: "LeaveCreditYear",
+            schema: "leave",
+            table: "SkeletalStaffRequests");
 
-            migrationBuilder.DropColumn(
-                name: "LeaveCreditedAt",
-                schema: "leave",
-                table: "SkeletalStaffRequests");
+        migrationBuilder.DropColumn(
+            name: "LeaveCreditedAt",
+            schema: "leave",
+            table: "SkeletalStaffRequests");
 
-            migrationBuilder.DropColumn(
-                name: "DeductionDays",
-                schema: "leave",
-                table: "HolidayPeriods");
-        }
+        migrationBuilder.DropColumn(
+            name: "DeductionDays",
+            schema: "leave",
+            table: "HolidayPeriods");
+    }
 
-        /// <inheritdoc />
-        protected override void Down(MigrationBuilder migrationBuilder)
-        {
-            migrationBuilder.AddColumn<short>(
-                name: "LeaveCreditYear",
-                schema: "leave",
-                table: "SkeletalStaffRequests",
-                type: "smallint",
-                nullable: true);
+    protected override void Down(MigrationBuilder migrationBuilder)
+    {
+        migrationBuilder.AddColumn<short>(
+            name: "LeaveCreditYear",
+            schema: "leave",
+            table: "SkeletalStaffRequests",
+            type: "smallint",
+            nullable: true);
 
-            migrationBuilder.AddColumn<DateTimeOffset>(
-                name: "LeaveCreditedAt",
-                schema: "leave",
-                table: "SkeletalStaffRequests",
-                type: "datetimeoffset",
-                nullable: true);
+        migrationBuilder.AddColumn<DateTimeOffset>(
+            name: "LeaveCreditedAt",
+            schema: "leave",
+            table: "SkeletalStaffRequests",
+            type: "datetimeoffset",
+            nullable: true);
 
-            migrationBuilder.AddColumn<short>(
-                name: "DeductionDays",
-                schema: "leave",
-                table: "HolidayPeriods",
-                type: "smallint",
-                nullable: false,
-                defaultValue: (short)0);
-        }
+        migrationBuilder.AddColumn<short>(
+            name: "DeductionDays",
+            schema: "leave",
+            table: "HolidayPeriods",
+            type: "smallint",
+            nullable: false,
+            defaultValue: (short)0);
     }
 }

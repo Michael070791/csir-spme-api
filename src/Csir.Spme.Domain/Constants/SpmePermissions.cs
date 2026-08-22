@@ -28,6 +28,11 @@ public static class SpmePermissions
     public const string EmployeeImportsCancel = "employee-imports.cancel";
 
     public const string HrAnalyticsRead = "hr.analytics.read";
+    public const string AppraisalsSelf = "appraisals.self";
+    public const string AppraisalsReview = "appraisals.review";
+    public const string AppraisalsFinalApprove = "appraisals.final-approve";
+    public const string AppraisalsAdmin = "appraisals.admin";
+    public const string AppraisalsFinalRead = "appraisals.final-read";
 
     public const string LeaveRead = "leave.read";
     public const string LeaveRequest = "leave.request";
@@ -95,7 +100,7 @@ public static class SpmePermissions
         InstitutesRead, InstitutesManage, OrganizationRead, OrganizationManage,
         EmployeesRead, EmployeesReadSensitive, EmployeesWrite, EmployeesVerify,
         EmployeeImportsRead, EmployeeImportsCreate, EmployeeImportsCommit, EmployeeImportsCancel,
-        HrAnalyticsRead,
+        HrAnalyticsRead, AppraisalsSelf, AppraisalsReview, AppraisalsFinalApprove, AppraisalsAdmin, AppraisalsFinalRead,
         LeaveRead, LeaveRequest, LeaveApprove, LeaveManage,
         StrategicPlansRead, StrategicPlansWrite, StrategicPlansActivate,
         ThrustsRead, ThrustsWrite, StakeholderPlansRead, StakeholderPlansWrite,

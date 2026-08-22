@@ -23,6 +23,10 @@
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
+    <EmbeddedResource Include="Communications/Templates/CSIR-performance-appraisal-logo.jpeg"
+                      LogicalName="Csir.Spme.Infrastructure.Communications.Templates.CSIR-performance-appraisal-logo.jpeg" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="..\Csir.Spme.Application\Csir.Spme.Application.csproj" />
   </ItemGroup>
   <ItemGroup>

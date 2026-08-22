@@ -27,6 +27,8 @@ public sealed class IdentitySeedHostedService : IHostedService
         "HeadOfDivision",
         "HeadOfAdmin",
         "InstituteDirector",
+        "DeputyDirectorGeneral",
+        "DirectorGeneral",
         "ScientificSecretary"
     ];
 
@@ -176,7 +178,8 @@ public sealed class IdentitySeedHostedService : IHostedService
             SpmePermissions.EmployeesRead, SpmePermissions.EmployeesWrite, SpmePermissions.EmployeesVerify,
             SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.LeaveManage,
             SpmePermissions.MemosRead, SpmePermissions.MemosWrite, SpmePermissions.MemosPublish,
-            SpmePermissions.NotificationsManage, SpmePermissions.PromotionsRead, SpmePermissions.PromotionsWrite
+            SpmePermissions.NotificationsManage, SpmePermissions.PromotionsRead, SpmePermissions.PromotionsWrite,
+            SpmePermissions.AppraisalsAdmin, SpmePermissions.AppraisalsFinalRead
         };
         foreach (var (roleName, permissions) in new[]
         {
@@ -188,11 +191,13 @@ public sealed class IdentitySeedHostedService : IHostedService
                 SpmePermissions.StrategicPlansActivate
             }),
             ("PlatformAdmin", SpmePermissions.All),
-            ("HeadOfSection", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.ReportsReview }),
-            ("HeadOfDivision", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.ReportsReview }),
+            ("HeadOfSection", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.ReportsReview, SpmePermissions.AppraisalsReview }),
+            ("HeadOfDivision", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.ReportsReview, SpmePermissions.AppraisalsReview }),
             ("ScientificSecretary", new[] { SpmePermissions.ReportsReview }),
             ("HeadOfAdmin", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove }),
-            ("InstituteDirector", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove })
+            ("InstituteDirector", new[] { SpmePermissions.LeaveRead, SpmePermissions.LeaveApprove, SpmePermissions.AppraisalsFinalApprove }),
+            ("DeputyDirectorGeneral", new[] { SpmePermissions.AppraisalsFinalApprove }),
+            ("DirectorGeneral", new[] { SpmePermissions.AppraisalsFinalApprove })
         })
         {
             var role = await roleManager.FindByNameAsync(roleName);
@@ -211,7 +216,7 @@ public sealed class IdentitySeedHostedService : IHostedService
             var existing = await roleManager.GetClaimsAsync(employeeRole);
             foreach (var permission in new[] { SpmePermissions.MemosRead, SpmePermissions.NotificationsSelf,
                          SpmePermissions.LeaveRead, SpmePermissions.LeaveRequest, SpmePermissions.ReportsSelf,
-                         SpmePermissions.PromotionsSelfRead })
+                         SpmePermissions.PromotionsSelfRead, SpmePermissions.AppraisalsSelf })
             {
                 if (!existing.Any(claim => claim.Type == "permission" && claim.Value == permission))
                     await roleManager.AddClaimAsync(employeeRole, new Claim("permission", permission));

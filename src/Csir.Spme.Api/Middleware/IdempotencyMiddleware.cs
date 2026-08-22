@@ -164,7 +164,9 @@ internal sealed class IdempotencyMiddleware(RequestDelegate next, IConfiguration
             "/api/v2/indicators",
             "/api/v2/indicator-measurements",
             "/api/v2/projects",
-            "/api/v2/technologies"
+            "/api/v2/technologies",
+            "/api/v2/appraisal-cycles",
+            "/api/v2/performance-appraisals"
         };
         if (retryProtectedRoots.Any(root =>
                 request.Path.StartsWithSegments(root, StringComparison.OrdinalIgnoreCase)))

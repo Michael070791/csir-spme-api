@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Csir.Spme.Domain.Hr;
 using Csir.Spme.Domain.Promotions;
 using Csir.Spme.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
@@ -134,7 +135,7 @@ internal static class PromotionSubmissionPreparation
             .Select(item => new { item.InstitutionRecognitionStatus, item.RelevantFieldStatus })
             .ToListAsync(cancellationToken);
         var appraisals = await db.PerformanceAppraisals.AsNoTracking()
-            .Where(item => item.EmployeeId == employee.Id)
+            .Where(item => item.EmployeeId == employee.Id && item.Status == AppraisalStatuses.Approved)
             .Select(item => new { item.Outcome, item.ApprovedAt })
             .ToListAsync(cancellationToken);
         var selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()

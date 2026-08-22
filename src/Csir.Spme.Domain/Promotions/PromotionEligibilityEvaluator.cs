@@ -24,9 +24,6 @@ public sealed record PromotionEligibilityEvaluation(
 
 public static class PromotionEligibilityEvaluator
 {
-    // Temporary 16 August 2026: Conditions of Service Sections 20-22 require both a verified
-    // B.Sc. and a satisfactory appraisal. Until the HR appraisal plan lands, evidence is met
-    // when either is satisfied. Restore AND after appraisals can be recorded.
     public static PromotionEligibilityEvaluation Evaluate(PromotionEligibilityFacts facts)
     {
         var serviceRequirementMetOn = facts.SourceGradeEffectiveDate.AddYears(facts.MinimumYearsInSourceGrade);
@@ -41,18 +38,16 @@ public static class PromotionEligibilityEvaluator
         if (facts.EffectivePromotionDate < serviceRequirementMetOn)
             return Result(PromotionConstants.EligibilityNotYetEligible, serviceRequirementMetOn, completedYears, ["source-grade-service"], pending, facts);
 
-        var evidenceSatisfied = facts.QualificationSatisfied || facts.AppraisalSatisfied;
-        if (!evidenceSatisfied)
+        if (!facts.QualificationSatisfied)
         {
-            if (facts.QualificationRejected)
-                blocking.Add("qualification");
-            else
-                pending.Add("qualification");
+            if (facts.QualificationRejected) blocking.Add("qualification");
+            else pending.Add("qualification");
+        }
 
-            if (facts.AppraisalRejected)
-                blocking.Add("satisfactory-appraisal");
-            else
-                pending.Add("satisfactory-appraisal");
+        if (!facts.AppraisalSatisfied)
+        {
+            if (facts.AppraisalRejected) blocking.Add("satisfactory-appraisal");
+            else pending.Add("satisfactory-appraisal");
         }
 
         var state = blocking.Count > 0 ? PromotionConstants.EligibilityNotEligible :

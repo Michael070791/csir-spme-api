@@ -19,6 +19,52 @@ public sealed class WorkflowNotificationOutbox(
     private const string LeaveApprovedEventType = "leave.approved.v1";
     private const string LeaveRejectedEventType = "leave.rejected.v1";
 
+    public async Task StageAppraisalNoticeAsync(
+        Guid appraisalId,
+        Guid recipientUserId,
+        string eventName,
+        string title,
+        string message,
+        string idempotencySuffix,
+        CancellationToken ct = default)
+    {
+        var eventType = $"appraisal.{eventName}.v1";
+        await StageAsync(new CommunicationOutboxMessage(
+            "event", recipientUserId.ToString("N"), eventType,
+            JsonSerializer.Serialize(new { eventType, appraisalId, recipientUserId }),
+            false, $"appraisal-{eventName}", $"appraisal-{eventName}:{appraisalId:N}:{idempotencySuffix}"), ct);
+        db.Notifications.Add(new Notification(recipientUserId, title, message, $"/appraisals/{appraisalId:D}"));
+
+        var recipient = await db.Users.AsNoTracking()
+            .Where(user => user.Id == recipientUserId && user.AccountStatus == "active")
+            .Select(user => new { user.DisplayName, user.Email, user.PhoneNumber, user.EmployeeId })
+            .FirstOrDefaultAsync(ct);
+        if (recipient is null) return;
+
+        var employeeContact = recipient.EmployeeId.HasValue
+            ? await db.Employees.AsNoTracking()
+                .Where(employee => employee.Id == recipient.EmployeeId.Value)
+                .Select(employee => new { Email = employee.PrimaryEmail, employee.Phone })
+                .FirstOrDefaultAsync(ct)
+            : null;
+        var email = FirstDeliverableEmail(recipient.Email, employeeContact?.Email);
+        var phone = FirstDeliverablePhone(recipient.PhoneNumber, employeeContact?.Phone);
+        var category = $"appraisal-{eventName}";
+        if (email is not null)
+        {
+            var rendered = renderer.AppraisalNotice(recipient.DisplayName, title, message, appraisalId);
+            await StageEmailAsync(email, rendered.Subject, rendered.HtmlBody, rendered.TextBody, category,
+                $"{category}-email:{appraisalId:N}:{idempotencySuffix}:{DestinationKey(email)}", ct);
+        }
+        if (phone is not null)
+        {
+            var link = $"{renderer.StaffPortalUrl.TrimEnd('/')}/appraisals/{appraisalId:D}";
+            await StageAsync(new CommunicationOutboxMessage(
+                "sms", phone, null, $"CSIR: {message} Sign in: {link}", false, category,
+                $"{category}-sms:{appraisalId:N}:{idempotencySuffix}:{DestinationKey(phone)}"), ct);
+        }
+    }
+
     public async Task StageStaffQuarterlyReportSubmittedAsync(
         StaffQuarterlyReportNotification notification,
         CancellationToken ct = default)

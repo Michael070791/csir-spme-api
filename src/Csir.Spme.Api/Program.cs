@@ -99,6 +99,7 @@ builder.Services.AddOpenApi("v2", options =>
     options.AddDocumentTransformer<BearerSecuritySchemeTransformer>();
     options.AddOperationTransformer<BearerAuthorizationOperationTransformer>();
     options.AddOperationTransformer<IdempotencyOperationTransformer>();
+    options.AddOperationTransformer<AppraisalConcurrencyOperationTransformer>();
 });
 builder.Services.AddSignalR();
 

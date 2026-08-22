@@ -135,6 +135,17 @@ public static class AuthenticationConfiguration
                     InstituteStaffAccess.HasStaffManagementWriteCompatibility(ctx.User)))
             .AddPolicy(AuthorizationPolicies.ReadHrDashboard, policy =>
                 policy.RequireAssertion(ctx => InstituteStaffAccess.CanReadInstituteHr(ctx.User)))
+            .AddPolicy(AuthorizationPolicies.ManageAppraisalCycles, policy =>
+                policy.RequireAssertion(ctx => HasPermissionOrRole(ctx, SpmePermissions.AppraisalsAdmin,
+                    SpmeRoles.PlatformAdmin, SpmeRoles.HrAdmin)))
+            .AddPolicy(AuthorizationPolicies.ReadAppraisals, policy =>
+                policy.RequireClaim("permission", SpmePermissions.AppraisalsFinalRead))
+            .AddPolicy(AuthorizationPolicies.ManageOwnAppraisals, policy =>
+                policy.RequireClaim("permission", SpmePermissions.AppraisalsSelf))
+            .AddPolicy(AuthorizationPolicies.ReviewAppraisals, policy =>
+                policy.RequireClaim("permission", SpmePermissions.AppraisalsReview))
+            .AddPolicy(AuthorizationPolicies.ApproveAppraisals, policy =>
+                policy.RequireClaim("permission", SpmePermissions.AppraisalsFinalApprove))
             .AddPolicy(AuthorizationPolicies.ReadProfileImages, policy =>
                 policy.RequireAssertion(ctx =>
                     HasAnyRole(ctx, SpmeRoles.PlatformAdmin, SpmeRoles.InstituteAdmin, SpmeRoles.HrAdmin, SpmeRoles.Employee) ||

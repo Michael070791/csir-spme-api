@@ -13,6 +13,8 @@ public static class SpmeRoles
     public const string HeadOfDivision = "HeadOfDivision";
     public const string HeadOfAdmin = "HeadOfAdmin";
     public const string InstituteDirector = "InstituteDirector";
+    public const string DeputyDirectorGeneral = "DeputyDirectorGeneral";
+    public const string DirectorGeneral = "DirectorGeneral";
     public const string ScientificSecretary = "ScientificSecretary";
 
     public static readonly string[] All =
@@ -28,6 +30,8 @@ public static class SpmeRoles
         HeadOfDivision,
         HeadOfAdmin,
         InstituteDirector,
+        DeputyDirectorGeneral,
+        DirectorGeneral,
         ScientificSecretary
     ];
 }
@@ -71,6 +75,11 @@ public static class AuthorizationPolicies
     public const string ApproveLeave = "leave.approve";
     public const string ManageLeave = "leave.manage";
     public const string ReadHrDashboard = "hr.dashboard.read";
+    public const string ManageAppraisalCycles = "appraisals.manage-cycles";
+    public const string ReadAppraisals = "appraisals.final-read";
+    public const string ManageOwnAppraisals = "appraisals.self";
+    public const string ReviewAppraisals = "appraisals.review";
+    public const string ApproveAppraisals = "appraisals.final-approve";
     public const string ReadKnowledge = "knowledge.read";
     public const string WriteKnowledge = "knowledge.write";
     public const string ReadProjects = "projects.read";

@@ -43,16 +43,20 @@ public sealed class PromotionEligibilityEvaluatorTests
     }
 
     [Fact]
-    public void Evaluate_Treats_Verified_Degree_Or_Satisfactory_Appraisal_As_Evidence()
+    public void Evaluate_Requires_Both_Verified_Degree_And_Satisfactory_Appraisal()
     {
         var degreeOnly = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: true, appraisalSatisfied: false));
         var appraisalOnly = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: false, appraisalSatisfied: true));
+        var both = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: true, appraisalSatisfied: true));
         var pending = PromotionEligibilityEvaluator.Evaluate(Facts(qualificationSatisfied: false, appraisalSatisfied: false));
         var rejected = PromotionEligibilityEvaluator.Evaluate(Facts(
             qualificationSatisfied: false, qualificationRejected: true, appraisalSatisfied: false, appraisalRejected: true));
 
-        degreeOnly.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
-        appraisalOnly.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
+        degreeOnly.EligibilityState.Should().Be(PromotionConstants.EligibilityNeedsHrReview);
+        degreeOnly.PendingHrChecks.Should().ContainSingle("satisfactory-appraisal");
+        appraisalOnly.EligibilityState.Should().Be(PromotionConstants.EligibilityNeedsHrReview);
+        appraisalOnly.PendingHrChecks.Should().ContainSingle("qualification");
+        both.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
         pending.EligibilityState.Should().Be(PromotionConstants.EligibilityNeedsHrReview);
         rejected.EligibilityState.Should().Be(PromotionConstants.EligibilityNotEligible);
     }
@@ -60,7 +64,7 @@ public sealed class PromotionEligibilityEvaluatorTests
     private static PromotionEligibilityEvaluation Evaluate(DateTime sourceGradeDate, DateTime cycleDate, short requiredYears) =>
         PromotionEligibilityEvaluator.Evaluate(new PromotionEligibilityFacts(
             PromotionConstants.SeniorStaff, PromotionConstants.PathActive, sourceGradeDate, requiredYears, cycleDate,
-            true, false, false, false));
+            true, false, true, false));
 
     private static PromotionEligibilityFacts Facts(
         bool qualificationSatisfied,

@@ -67,6 +67,13 @@ public static class DependencyInjection
         services.AddScoped<ILeaveRequestRepository>(sp => sp.GetRequiredService<SpmeDbContext>());
         services.AddScoped<IInstituteDirectory, InstituteDirectory>();
         services.AddScoped<IAuditService, AuditService>();
+        services.AddOptions<AppraisalReminderOptions>()
+            .Bind(configuration.GetSection(AppraisalReminderOptions.SectionName))
+            .Validate(options => options.InitialDelaySeconds >= 1 && options.IntervalMinutes >= 1,
+                "Appraisal reminder scheduling intervals must be positive.")
+            .ValidateOnStart();
+        services.AddScoped<AppraisalReminderService>();
+        services.AddHostedService<AppraisalReminderHostedService>();
         services.AddScoped<IAccountActivationService, AccountActivationService>();
         services.AddScoped<IPasswordResetService, PasswordResetService>();
         services.AddSingleton(TimeProvider.System);

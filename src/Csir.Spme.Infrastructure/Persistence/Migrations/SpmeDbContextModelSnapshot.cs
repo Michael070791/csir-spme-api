@@ -944,6 +944,980 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                     b.ToTable("Notifications", "comms");
                 });
 
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalCompetencyRatingRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FactorCode")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("HodSubmissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short?>("Rating")
+                        .HasColumnType("smallint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HodSubmissionId", "FactorCode")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalCompetencyRatings", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalCompetencyRatings_Rating", "[Rating] IS NULL OR [Rating] BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalCycle", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("EndDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FormTemplateChecksum")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FormTemplateVersion")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("InstituteId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("MidyearEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("MidyearStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTime>("PlanningEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("PlanningStart")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ReopenReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("StartDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("Year")
+                        .HasColumnType("smallint");
+
+                    b.Property<DateTime>("YearEndEnd")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("YearEndStart")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InstituteId", "Year")
+                        .IsUnique();
+
+                    b.HasIndex("InstituteId", "Status", "Year");
+
+                    b.ToTable("AppraisalCycles", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalCycles_Status", "[Status] IN ('draft','open','closed')");
+
+                            t.HasCheckConstraint("CK_AppraisalCycles_Windows", "[StartDate] <= [PlanningStart] AND [PlanningStart] <= [PlanningEnd] AND [PlanningEnd] < [MidyearStart] AND [MidyearStart] <= [MidyearEnd] AND [MidyearEnd] < [YearEndStart] AND [YearEndStart] <= [YearEndEnd] AND [YearEndEnd] <= [EndDate]");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalDirectorDecision", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CommentsOnWork")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("DecidedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Decision")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<Guid>("DirectorUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("RecommendationsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ReturnReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("Version")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "Phase", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalDirectorDecisions", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalDirectorDecisions_Decision", "[Decision] IN ('approved','returned')");
+
+                            t.HasCheckConstraint("CK_AppraisalDirectorDecisions_Phase", "[Phase] IN ('midyear','year-end')");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalHodSubmission", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HodUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ResponseToDecline")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("SubmittedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("SupervisorComments")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("Version")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "Phase", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalHodSubmissions", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalHodSubmissions_Phase", "[Phase] IN ('midyear','year-end')");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalKeyCompetency", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Competency")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("DisplayOrder")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "DisplayOrder")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalKeyCompetencies", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearCompetencyRemark", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Competency")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HodSubmissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Remarks")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("HodSubmissionId", "Competency")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalMidyearCompetencyRemarks", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearCompetencyReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Competency")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProgressReview")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Remarks")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "Competency")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalMidyearCompetencyReviews", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearTargetRemark", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AppraisalTargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HodSubmissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Remarks")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppraisalTargetId");
+
+                    b.HasIndex("HodSubmissionId", "AppraisalTargetId")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalMidyearTargetRemarks", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearTargetReview", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AppraisalTargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProgressReview")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Remarks")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppraisalTargetId");
+
+                    b.HasIndex("PerformanceAppraisalId", "AppraisalTargetId")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalMidyearTargetReviews", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalReminderRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OffsetCode")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Stage")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset>("StagedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "Stage", "OffsetCode")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalReminderRecords", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalSignatureRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("Accepted")
+                        .HasColumnType("bit");
+
+                    b.Property<short>("Attempt")
+                        .HasColumnType("smallint");
+
+                    b.Property<string>("Comments")
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DeclineReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<Guid>("EmployeeUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Phase")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset>("RecordedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "Phase", "Attempt")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalSignatureRecords", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalSignatureRecords_DeclineReason", "[Accepted] = 1 OR [DeclineReason] IS NOT NULL");
+
+                            t.HasCheckConstraint("CK_AppraisalSignatureRecords_Phase", "[Phase] IN ('planning-employee','planning-hod','midyear-employee-submission','midyear-hod','midyear','year-end-employee-submission','year-end-hod','year-end')");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTarget", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CoreArea")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("DisplayOrder")
+                        .HasColumnType("smallint");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ResourcesRequired")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Timeline")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId", "DisplayOrder");
+
+                    b.ToTable("AppraisalTargets", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalTargets_DisplayOrder", "[DisplayOrder] > 0");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTargetAmendment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("AcceptedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("AppraisalTargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OriginalResourcesRequired")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("OriginalTarget")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("OriginalTimeline")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("ProposedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("RevisedResourcesRequired")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("RevisedTarget")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("RevisedTimeline")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("Version")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppraisalTargetId");
+
+                    b.HasIndex("PerformanceAppraisalId", "AppraisalTargetId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalTargetAmendments", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalTargetAmendments_Status", "[Status] IN ('proposed','accepted','superseded')");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTargetAssessmentRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AppraisalTargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Comments")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("HodSubmissionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("Rating")
+                        .HasColumnType("smallint");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppraisalTargetId");
+
+                    b.HasIndex("HodSubmissionId", "AppraisalTargetId")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalTargetAssessments", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalTargetAssessments_Rating", "[Rating] BETWEEN 1 AND 5");
+                        });
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTargetVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AppraisalTargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CapturedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CoreArea")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ResourcesRequired")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<string>("Target")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("Timeline")
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<short>("Version")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppraisalTargetId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalTargetVersions", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTrainingRecord", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Institution")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Programme")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTime>("TrainingDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PerformanceAppraisalId");
+
+                    b.ToTable("AppraisalTrainingRecords", "hr");
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalYearEndResult", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AppraisalTargetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ExtentAndConstraints")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<Guid>("PerformanceAppraisalId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("WorkAccomplished")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<short>("WorkCompletedPercentage")
+                        .HasColumnType("smallint");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AppraisalTargetId");
+
+                    b.HasIndex("PerformanceAppraisalId", "AppraisalTargetId")
+                        .IsUnique();
+
+                    b.ToTable("AppraisalYearEndResults", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_AppraisalYearEndResults_Percentage", "[WorkCompletedPercentage] BETWEEN 0 AND 100");
+                        });
+                });
+
             modelBuilder.Entity("Csir.Spme.Domain.Hr.EducationRecord", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1898,11 +2872,18 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("AppraisalCycleId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime>("AppraisalPeriodEnd")
                         .HasColumnType("datetime2");
 
                     b.Property<DateTime>("AppraisalPeriodStart")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("AppraiserSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTimeOffset?>("ApprovedAt")
                         .HasColumnType("datetimeoffset");
@@ -1910,12 +2891,22 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("ApprovedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ApproverSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal?>("BehavioralScore")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("Comments")
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
-                    b.Property<DateTimeOffset>("CompletedAt")
+                    b.Property<DateTimeOffset?>("CompletedAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal?>("CoreScore")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -1923,13 +2914,53 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("CreatedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("DirectorAssessmentJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("DirectorUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("EmployeeId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EmployeeSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("FinalDocumentFileId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("HodAssessmentJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("HodMidyearReviewJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("HodUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InstituteId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MidyearJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Outcome")
                         .IsRequired()
                         .HasMaxLength(32)
                         .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("PlanningJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("RoutingExceptionReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<byte[]>("RowVersion")
                         .IsConcurrencyToken()
@@ -1940,18 +2971,57 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                     b.Property<Guid?>("SourceFileId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("StaffSignatureAttemptsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<decimal?>("TotalScore")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<Guid?>("UpdatedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("YearEndJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.HasKey("Id");
 
-                    b.HasIndex("EmployeeId", "AppraisalPeriodStart", "AppraisalPeriodEnd")
+                    b.HasIndex("AppraisalCycleId");
+
+                    b.HasIndex("FinalDocumentFileId");
+
+                    b.HasIndex("DirectorUserId", "Status", "AppraisalPeriodEnd");
+
+                    b.HasIndex("EmployeeId", "Status", "UpdatedAt");
+
+                    b.HasIndex("HodUserId", "Status", "AppraisalPeriodEnd");
+
+                    b.HasIndex("InstituteId", "Status", "UpdatedAt");
+
+                    b.HasIndex("EmployeeId", "AppraisalCycleId", "AppraisalPeriodStart", "AppraisalPeriodEnd")
                         .IsUnique();
 
-                    b.ToTable("PerformanceAppraisals", "hr");
+                    b.ToTable("PerformanceAppraisals", "hr", t =>
+                        {
+                            t.HasCheckConstraint("CK_PerformanceAppraisals_DistinctReviewers", "[HodUserId] IS NULL OR [DirectorUserId] IS NULL OR [HodUserId] <> [DirectorUserId]");
+
+                            t.HasCheckConstraint("CK_PerformanceAppraisals_Outcome", "[Outcome] IN ('', 'satisfactory', 'unsatisfactory')");
+
+                            t.HasCheckConstraint("CK_PerformanceAppraisals_Period", "[AppraisalPeriodStart] <= [AppraisalPeriodEnd]");
+
+                            t.HasCheckConstraint("CK_PerformanceAppraisals_Scores", "([BehavioralScore] IS NULL OR CAST([BehavioralScore] AS REAL) BETWEEN 0 AND 50) AND ([CoreScore] IS NULL OR CAST([CoreScore] AS REAL) BETWEEN 0 AND 50) AND ([TotalScore] IS NULL OR CAST([TotalScore] AS REAL) BETWEEN 0 AND 100)");
+
+                            t.HasCheckConstraint("CK_PerformanceAppraisals_Status", "[Status] IN ('planning','planning-review','midyear','midyear-review','midyear-staff-signature','midyear-director-review','year-end','hod-assessment','staff-signature','director-review','approved')");
+                        });
                 });
 
             modelBuilder.Entity("Csir.Spme.Domain.Iam.AccountActivationChallenge", b =>
@@ -6451,6 +7521,180 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalCompetencyRatingRecord", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalHodSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("HodSubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalDirectorDecision", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalHodSubmission", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalKeyCompetency", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearCompetencyRemark", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalHodSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("HodSubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearCompetencyReview", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearTargetRemark", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalTarget", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalTargetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalHodSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("HodSubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalMidyearTargetReview", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalTarget", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalTargetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalReminderRecord", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalSignatureRecord", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTarget", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTargetAmendment", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalTarget", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalTargetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTargetAssessmentRecord", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalTarget", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalTargetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalHodSubmission", null)
+                        .WithMany()
+                        .HasForeignKey("HodSubmissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTargetVersion", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalTarget", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalTargetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalTrainingRecord", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.AppraisalYearEndResult", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalTarget", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalTargetId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Hr.PerformanceAppraisal", null)
+                        .WithMany()
+                        .HasForeignKey("PerformanceAppraisalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Csir.Spme.Domain.Hr.EmployeeChild", b =>
                 {
                     b.HasOne("Csir.Spme.Domain.Hr.Employee", null)
@@ -6476,6 +7720,26 @@ namespace Csir.Spme.Infrastructure.Persistence.Migrations
                         .HasForeignKey("EmployeeId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+                });
+
+            modelBuilder.Entity("Csir.Spme.Domain.Hr.PerformanceAppraisal", b =>
+                {
+                    b.HasOne("Csir.Spme.Domain.Hr.AppraisalCycle", null)
+                        .WithMany()
+                        .HasForeignKey("AppraisalCycleId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Hr.Employee", null)
+                        .WithMany()
+                        .HasForeignKey("EmployeeId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("Csir.Spme.Domain.Common.FileRecord", null)
+                        .WithMany()
+                        .HasForeignKey("FinalDocumentFileId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Csir.Spme.Domain.Iam.NotificationPreference", b =>

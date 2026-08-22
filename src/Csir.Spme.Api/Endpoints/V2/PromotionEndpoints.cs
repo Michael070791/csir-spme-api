@@ -46,7 +46,7 @@ internal static class PromotionEndpoints
             .RequireAuthorization(AuthorizationPolicies.WritePromotions)
             .WithName("PromotionAssessments_Create")
             .WithSummary("Create a promotion assessment for one employee and cycle.")
-            .WithDescription("Evaluates the employee's current Conditions of Service job title against the matching catalog path, 1 January cycle date, verified qualification or satisfactory appraisal evidence, and path status. Duplicate employee-cycle-path rows, missing grades, and unmatched paths return conflict. The resulting snapshot is what unlocks start-promotion-submission for the employee.")
+            .WithDescription("Evaluates the employee's current Conditions of Service job title against the matching catalog path, 1 January cycle date, verified qualification and satisfactory final-approved appraisal evidence, and path status. Duplicate employee-cycle-path rows, missing grades, and unmatched paths return conflict. The resulting snapshot is what unlocks start-promotion-submission for the employee.")
             .Produces<PromotionAssessmentResponse>(StatusCodes.Status201Created)
             .ProducesProblem(StatusCodes.Status404NotFound)
             .ProducesProblem(StatusCodes.Status409Conflict);
@@ -160,7 +160,8 @@ internal static class PromotionEndpoints
         var qualifications = await db.EducationRecords.AsNoTracking()
             .Where(item => item.EmployeeId == employee.Id && item.QualificationLevel == path.RequiredQualificationLevel)
             .Select(item => new { item.InstitutionRecognitionStatus, item.RelevantFieldStatus }).ToListAsync(cancellationToken);
-        var appraisals = await db.PerformanceAppraisals.AsNoTracking().Where(item => item.EmployeeId == employee.Id)
+        var appraisals = await db.PerformanceAppraisals.AsNoTracking().Where(item =>
+                item.EmployeeId == employee.Id && item.Status == AppraisalStatuses.Approved)
             .Select(item => new { item.Outcome, item.ApprovedAt }).ToListAsync(cancellationToken);
         var selfReportedPromotionDate = await db.EmployeeGradePromotionDates.AsNoTracking()
             .Where(item => item.EmployeeId == employee.Id && item.GradeId == employment.GradeId!.Value)
@@ -352,7 +353,7 @@ internal static class PromotionEndpoints
         var qualificationRejected = qualifications.Any(item =>
             item.InstitutionRecognitionStatus == "rejected" || item.RelevantFieldStatus == "rejected");
         var appraisals = await db.PerformanceAppraisals.AsNoTracking()
-            .Where(item => item.EmployeeId == employeeId)
+            .Where(item => item.EmployeeId == employeeId && item.Status == AppraisalStatuses.Approved)
             .Select(item => new { item.Outcome, item.ApprovedAt })
             .ToListAsync(cancellationToken);
         var presentGradeStartDate = PromotionStatusWindowBuilder.ResolvePresentGradeStartDate(

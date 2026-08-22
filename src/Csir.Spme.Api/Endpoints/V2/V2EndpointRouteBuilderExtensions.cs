@@ -26,6 +26,8 @@ public static class V2EndpointRouteBuilderExtensions
         endpoints.MapPromotionSubmissionEndpoints();
         endpoints.MapPromotionReportEndpoints();
         endpoints.MapPromotionFormAssessmentEndpoints();
+        endpoints.MapAppraisalCycleEndpoints();
+        endpoints.MapAppraisalEndpoints();
         return endpoints;
     }
 }

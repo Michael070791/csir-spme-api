@@ -37,6 +37,19 @@ public sealed class BrandedEmailRenderer
             resetUrl,
             "This secure link expires in 24 hours and can be used only once. If you did not request this change, you can safely ignore this email. Never share this link with anyone.");
 
+    public RenderedEmail AppraisalNotice(string displayName, string title, string message, Guid appraisalId)
+    {
+        var link = $"{_portals.StaffPortalUrl.TrimEnd('/')}/appraisals/{appraisalId:D}";
+        return Render(
+            title,
+            displayName,
+            title,
+            message,
+            "Open appraisal",
+            link,
+            "Sign in to the CSIR staff portal to review the confidential appraisal. Scores, comments, recommendations, and disagreement reasons are never included in notification previews.");
+    }
+
     public RenderedEmail LeaveDecision(
         string displayName,
         string decision,

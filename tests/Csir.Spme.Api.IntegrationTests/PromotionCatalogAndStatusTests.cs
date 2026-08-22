@@ -63,13 +63,14 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
     }
 
     [Fact]
-    public async Task Live_Status_Matches_Non_Phd_Path_For_Assistant_Research_Scientist()
+    public async Task Live_Status_Matches_Non_Phd_Path_And_Awaits_A_Final_Appraisal()
     {
         var seed = await SeedLinkedEmployeeAsync(PromotionConstants.SeniorMember, "assistant-research-scientist", verifiedMasters: true);
         using var owner = Client(SpmeRoles.Employee, seed.EmployeeId, seed.InstituteId);
         var mine = await owner.GetFromJsonAsync<PromotionStatusResponse>("/api/v2/promotion-status/me");
 
-        mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
+        mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityNeedsHrReview);
+        mine.AvailableActions.Should().NotContain("start-promotion-submission");
         mine.NextPromotion!.PathCode.Should().Be(PromotionConstants.ResearchArsRsNonPhdPath);
         mine.NextPromotion.MinimumYearsInSourceGrade.Should().Be(5);
         mine.CurrentGrade!.Code.Should().Be("assistant-research-scientist");
@@ -79,13 +80,13 @@ public sealed class PromotionCatalogAndStatusTests : IClassFixture<SpmeApiFactor
     }
 
     [Fact]
-    public async Task Live_Status_Allows_Verified_Degree_Without_Appraisal_And_Does_Not_Start_Submission()
+    public async Task Live_Status_Requires_A_Final_Appraisal_Alongside_The_Verified_Degree()
     {
         var seed = await SeedLinkedEmployeeAsync(PromotionConstants.SeniorStaff, "technical-officer", verifiedDegree: true);
         using var owner = Client(SpmeRoles.Employee, seed.EmployeeId, seed.InstituteId);
         var mine = await owner.GetFromJsonAsync<PromotionStatusResponse>("/api/v2/promotion-status/me");
 
-        mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityEligibleForReview);
+        mine!.EligibilityState.Should().Be(PromotionConstants.EligibilityNeedsHrReview);
         mine.AvailableActions.Should().Contain("prepare-promotion-submission");
         mine.AvailableActions.Should().NotContain("start-promotion-submission");
         mine.NextAction.Should().Be(PromotionStatusMessages.PrepareDraftSubmission);

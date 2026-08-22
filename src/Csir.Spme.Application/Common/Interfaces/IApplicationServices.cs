@@ -97,6 +97,15 @@ public interface ICommunicationOutbox
 /// <summary>Stages workflow notifications in the same unit of work as the owning mutation.</summary>
 public interface IWorkflowNotificationOutbox
 {
+    Task StageAppraisalNoticeAsync(
+        Guid appraisalId,
+        Guid recipientUserId,
+        string eventName,
+        string title,
+        string message,
+        string idempotencySuffix,
+        CancellationToken ct = default);
+
     Task StageStaffQuarterlyReportSubmittedAsync(
         StaffQuarterlyReportNotification notification,
         CancellationToken ct = default);
